@@ -204,7 +204,7 @@ hierarchical_system_state_array = result2array(results['hierarchical'])
 figA = plot_multi_body_system_state_history(barycentric_system_state_array, bodies_to_propagate)
 figB = plot_multi_body_system_state_history(hierarchical_system_state_array, bodies_to_propagate, hierarchical=True)
 plt.tight_layout()
-#plt.show()
+plt.show()
 
 ################################################################################
 #GET EPHEMERIS AT EVERY TIMESTEP ###############################################
