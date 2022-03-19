@@ -1,0 +1,173 @@
+
+
+import numpy as np
+from tudatpy.util import result2array
+from tudatpy.kernel import constants
+from tudatpy.kernel import numerical_simulation
+from tudatpy.kernel.interface import spice
+from tudatpy.kernel.numerical_simulation import environment_setup
+from tudatpy.kernel.numerical_simulation import propagation_setup, propagation
+import pandas as pd
+################################################################################
+# GENERAL SIMULATION SETUP #####################################################
+################################################################################
+
+
+    # Load spice kernels.
+spice.load_standard_kernels()
+
+    # Set simulation start epoch.
+simulation_start_epoch = 1.0e7
+
+    # Set simulation end epoch.
+simulation_end_epoch = 1.0e7 + 30 * constants.JULIAN_DAY
+
+################################################################################
+# SETUP ENVIRONMENT ############################################################
+################################################################################
+
+    # Define bodies in simulation.
+bodies_to_create = ["Io","Jupiter"]
+
+    # Create bodies in simulation.
+body_settings = environment_setup.get_default_body_settings(bodies_to_create)
+body_system = environment_setup.create_system_of_bodies(body_settings)
+
+################################################################################
+# SETUP PROPAGATION ############################################################
+################################################################################
+bodies_to_propagate = ["Io"]
+central_bodies = ["Jupiter"]
+
+acceleration_settings_io = dict(
+    Jupiter = [propagation_setup.acceleration.point_mass_gravity()]
+)
+acceleration_settings = {"Io": acceleration_settings_io}
+
+acceleration_models = propagation_setup.create_acceleration_models(
+    body_system,acceleration_settings,bodies_to_propagate,central_bodies
+)
+
+    ############################################################################
+    # SETUP PROPAGATION : PROPAGATION SETTINGS #################################
+    ############################################################################
+
+    # Get system initial state.
+system_initial_state = propagation.get_initial_state_of_bodies(
+    bodies_to_propagate=bodies_to_propagate,
+    central_bodies=central_bodies,
+    body_system=body_system,
+    initial_time=simulation_start_epoch,
+)
+    # Create termination settings.
+termination_condition = propagation_setup.propagator.time_termination(simulation_end_epoch)
+
+    #create dependent variables
+dependent_variables_to_save = [
+    propagation_setup.dependent_variable.keplerian_state("Io","Jupiter")
+]
+
+    # Create propagation settings.
+propagator_settings = propagation_setup.propagator.translational(
+    central_bodies,
+    acceleration_models,
+    bodies_to_propagate,
+    system_initial_state,
+    termination_condition,
+    output_variables = dependent_variables_to_save
+)
+    # Create numerical integrator settings.
+fixed_step_size = 1500.0
+integrator_settings = propagation_setup.integrator.runge_kutta_4(
+    simulation_start_epoch, fixed_step_size
+)
+
+    ############################################################################
+    # PROPAGATE ################################################################
+    ############################################################################
+
+    # Instantiate the dynamics simulator.
+dynamics_simulator = numerical_simulation.SingleArcSimulator(
+    body_system, integrator_settings, propagator_settings)
+
+    # Propagate and store results
+states = dynamics_simulator.state_history
+dep_var = dynamics_simulator.dependent_variable_history
+states_array = result2array(states)
+
+
+
+################################################################################
+# VISUALISATION  ################################
+################################################################################
+from matplotlib import pyplot as plt
+
+def plot_multi_body_system_state_history(states_array, bodies_to_propagate):
+    fig1 = plt.figure(figsize=(8, 6))
+    ax1 = fig1.add_subplot(111, projection='3d')
+    ax1.set_title(f'Trajectory of Io w.r.t Jupiter')
+    ax1.scatter(0, 0, 0, marker='x', label="Jupiter", color='black')
+    ax1.plot(states_array[:, 1], states_array[:, 2], states_array[:, 3], label=bodies_to_propagate[0], linestyle='-.')
+
+    ax1.legend()
+    ax1.set_xlabel('x [m]')
+    ax1.set_ylabel('y [m]')
+    ax1.set_zlabel('z [m]')
+    return fig1
+figA = plot_multi_body_system_state_history(states_array, bodies_to_propagate)
+plt.tight_layout()
+#plt.show()
+
+
+df_array = pd.DataFrame(data=states_array)
+
+
+################################################################################
+# KEPLERIAN ELEMENTS  ##########################################################
+################################################################################
+
+dep_var_array = result2array(dep_var)
+
+time = dep_var_array[:,0]
+time_step = time-1.0e7
+time_hours = time_step / 3600
+
+dep_var_array = pd.DataFrame(data=dep_var_array, columns ="t a e i RAAN Argument_periapsis true_anomaly".split())
+
+
+fig, ((ax2, ax3), (ax4, ax5)) = plt.subplots(2, 2, figsize=(9, 12))
+fig.suptitle('Evolution of Kepler elements of Io during the propagation.')
+
+#SEMI MAJOR AXIS
+semi_major_axis = dep_var_array.loc[:,"a"]
+ax2.plot(time_hours, semi_major_axis)
+ax2.set_ylabel('Semi-major axis [m]')
+ax2.set_ylim([410000*1e3, 430000*1e3])
+
+
+#ECCENTRICITY
+eccentricity = dep_var_array.loc[:,"e"]
+ax3.plot(time_hours, eccentricity)
+ax3.set_ylabel('Eccentricity [-]')
+
+#INCLINATION
+inclination = np.rad2deg(dep_var_array.loc[:,"i"])
+ax4.plot(time_hours, inclination)
+ax4.set_ylabel('inclination [deg]')
+ax4.set_ylim(2.201, 2.203)
+
+#RAAN
+raan = np.rad2deg(dep_var_array.loc[:,"RAAN"])
+ax5.plot(time_hours, raan)
+ax5.set_ylabel('RAAN [deg]')
+
+for ax in fig.get_axes():
+    ax.set_xlabel('Time [hr]')
+    ax.set_xlim([min(time_hours), max(time_hours)])
+    ax.grid()
+    ax.relim()
+    ax.autoscale_view()
+plt.tight_layout()
+plt.show()
+
+print(inclination)
