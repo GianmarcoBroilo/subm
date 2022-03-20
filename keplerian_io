@@ -27,11 +27,13 @@ simulation_end_epoch = 1.0e7 + 12.0 * constants.JULIAN_YEAR
 ################################################################################
 
     # Define bodies in simulation.
-bodies_to_create = ["Io","Jupiter", "Sun"]
+bodies_to_create = ["Io","Jupiter", "Sun","Ganymede","Europa"]
 
 
     # Create bodies in simulation.
-body_settings = environment_setup.get_default_body_settings(bodies_to_create)
+global_frame_origin = "SSB"
+global_frame_orientation = "ECLIPJ2000"
+body_settings = environment_setup.get_default_body_settings(bodies_to_create,global_frame_origin,global_frame_orientation)
 body_system = environment_setup.create_system_of_bodies(body_settings)
 
 ################################################################################
@@ -39,10 +41,12 @@ body_system = environment_setup.create_system_of_bodies(body_settings)
 ################################################################################
 bodies_to_propagate = ["Io"]
 central_bodies = ["Jupiter"]
-
+states = {}
 acceleration_settings_io = dict(
     Jupiter = [propagation_setup.acceleration.point_mass_gravity()],
-    Sun = [propagation_setup.acceleration.point_mass_gravity()]
+    Sun = [propagation_setup.acceleration.point_mass_gravity()],
+    Ganymede = [propagation_setup.acceleration.point_mass_gravity()],
+    Europa = [propagation_setup.acceleration.point_mass_gravity()],
 )
 acceleration_settings = {"Io": acceleration_settings_io}
 
@@ -79,7 +83,7 @@ propagator_settings = propagation_setup.propagator.translational(
     output_variables = dependent_variables_to_save
 )
     # Create numerical integrator settings.
-fixed_step_size = 1500.0
+fixed_step_size = 1000.0
 integrator_settings = propagation_setup.integrator.runge_kutta_4(
     simulation_start_epoch, fixed_step_size
 )
@@ -90,7 +94,7 @@ integrator_settings = propagation_setup.integrator.runge_kutta_4(
 
     # Instantiate the dynamics simulator.
 dynamics_simulator = numerical_simulation.SingleArcSimulator(
-    body_system, integrator_settings, propagator_settings)
+    body_system, integrator_settings, propagator_settings, print_dependent_variable_data=True)
 
     # Propagate and store results
 states = dynamics_simulator.state_history
@@ -118,7 +122,8 @@ def plot_body_system_state_history(states_array,bodies_to_propagate):
     ax1.set_xlabel('x [m]')
     ax1.set_ylabel('y [m]')
     ax1.set_zlabel('z [m]')
-    ax1.lims = [-4.0E8, 4.0E8]
+    ax1.set_zlim([-4E8, 4E8])
+    ax1.set_aspect('auto', 'box')
     return fig1
 
 states_io_array = result2array(states)
@@ -170,7 +175,7 @@ ax4.set_ylim(2.201, 2.203)
 raan = np.rad2deg(dep_var_array.loc[:,"RAAN"])
 ax5.plot(time_days, raan)
 ax5.set_ylabel('RAAN [deg]')
-#ax5.set_ylim([339.80, 339.9])
+
 
 for ax in fig.get_axes():
     ax.set_xlabel('Time [days]')
