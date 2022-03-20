@@ -20,14 +20,15 @@ spice.load_standard_kernels()
 simulation_start_epoch = 1.0e7
 
     # Set simulation end epoch.
-simulation_end_epoch = 1.0e7 + 30 * constants.JULIAN_DAY
+simulation_end_epoch = 1.0e7 + 12.0 * constants.JULIAN_YEAR
 
 ################################################################################
 # SETUP ENVIRONMENT ############################################################
 ################################################################################
 
     # Define bodies in simulation.
-bodies_to_create = ["Io","Jupiter"]
+bodies_to_create = ["Io","Jupiter", "Sun"]
+
 
     # Create bodies in simulation.
 body_settings = environment_setup.get_default_body_settings(bodies_to_create)
@@ -40,7 +41,8 @@ bodies_to_propagate = ["Io"]
 central_bodies = ["Jupiter"]
 
 acceleration_settings_io = dict(
-    Jupiter = [propagation_setup.acceleration.point_mass_gravity()]
+    Jupiter = [propagation_setup.acceleration.point_mass_gravity()],
+    Sun = [propagation_setup.acceleration.point_mass_gravity()]
 )
 acceleration_settings = {"Io": acceleration_settings_io}
 
@@ -48,9 +50,9 @@ acceleration_models = propagation_setup.create_acceleration_models(
     body_system,acceleration_settings,bodies_to_propagate,central_bodies
 )
 
-    ############################################################################
-    # SETUP PROPAGATION : PROPAGATION SETTINGS #################################
-    ############################################################################
+############################################################################
+# SETUP PROPAGATION : PROPAGATION SETTINGS #################################
+############################################################################
 
     # Get system initial state.
 system_initial_state = propagation.get_initial_state_of_bodies(
@@ -82,9 +84,9 @@ integrator_settings = propagation_setup.integrator.runge_kutta_4(
     simulation_start_epoch, fixed_step_size
 )
 
-    ############################################################################
-    # PROPAGATE ################################################################
-    ############################################################################
+ ############################################################################
+# PROPAGATE ################################################################
+############################################################################
 
     # Instantiate the dynamics simulator.
 dynamics_simulator = numerical_simulation.SingleArcSimulator(
@@ -93,33 +95,39 @@ dynamics_simulator = numerical_simulation.SingleArcSimulator(
     # Propagate and store results
 states = dynamics_simulator.state_history
 dep_var = dynamics_simulator.dependent_variable_history
-states_array = result2array(states)
+
 
 
 
 ################################################################################
 # VISUALISATION  ################################
 ################################################################################
+
 from matplotlib import pyplot as plt
 
-def plot_multi_body_system_state_history(states_array, bodies_to_propagate):
+
+def plot_body_system_state_history(states_array,bodies_to_propagate):
     fig1 = plt.figure(figsize=(8, 6))
     ax1 = fig1.add_subplot(111, projection='3d')
     ax1.set_title(f'Trajectory of Io w.r.t Jupiter')
     ax1.scatter(0, 0, 0, marker='x', label="Jupiter", color='black')
     ax1.plot(states_array[:, 1], states_array[:, 2], states_array[:, 3], label=bodies_to_propagate[0], linestyle='-.')
 
+
     ax1.legend()
     ax1.set_xlabel('x [m]')
     ax1.set_ylabel('y [m]')
     ax1.set_zlabel('z [m]')
+    ax1.lims = [-4.0E8, 4.0E8]
     return fig1
-figA = plot_multi_body_system_state_history(states_array, bodies_to_propagate)
+
+states_io_array = result2array(states)
+figA = plot_body_system_state_history(states_io_array, bodies_to_propagate)
 plt.tight_layout()
-#plt.show()
+plt.show()
 
 
-df_array = pd.DataFrame(data=states_array)
+df_array = pd.DataFrame(data=states_io_array)
 
 
 ################################################################################
@@ -130,7 +138,7 @@ dep_var_array = result2array(dep_var)
 
 time = dep_var_array[:,0]
 time_step = time-1.0e7
-time_hours = time_step / 3600
+time_days = time_step / 86400
 
 dep_var_array = pd.DataFrame(data=dep_var_array, columns ="t a e i RAAN Argument_periapsis true_anomaly".split())
 
@@ -140,34 +148,36 @@ fig.suptitle('Evolution of Kepler elements of Io during the propagation.')
 
 #SEMI MAJOR AXIS
 semi_major_axis = dep_var_array.loc[:,"a"]
-ax2.plot(time_hours, semi_major_axis)
+ax2.plot(time_days, semi_major_axis)
 ax2.set_ylabel('Semi-major axis [m]')
 ax2.set_ylim([410000*1e3, 430000*1e3])
 
 
 #ECCENTRICITY
 eccentricity = dep_var_array.loc[:,"e"]
-ax3.plot(time_hours, eccentricity)
+ax3.plot(time_days, eccentricity)
 ax3.set_ylabel('Eccentricity [-]')
+
+
 
 #INCLINATION
 inclination = np.rad2deg(dep_var_array.loc[:,"i"])
-ax4.plot(time_hours, inclination)
+ax4.plot(time_days, inclination)
 ax4.set_ylabel('inclination [deg]')
 ax4.set_ylim(2.201, 2.203)
 
 #RAAN
 raan = np.rad2deg(dep_var_array.loc[:,"RAAN"])
-ax5.plot(time_hours, raan)
+ax5.plot(time_days, raan)
 ax5.set_ylabel('RAAN [deg]')
+#ax5.set_ylim([339.80, 339.9])
 
 for ax in fig.get_axes():
-    ax.set_xlabel('Time [hr]')
-    ax.set_xlim([min(time_hours), max(time_hours)])
+    ax.set_xlabel('Time [days]')
+    ax.set_xlim([min(time_days), max(time_days)])
     ax.grid()
     ax.relim()
     ax.autoscale_view()
 plt.tight_layout()
 plt.show()
 
-print(inclination)
