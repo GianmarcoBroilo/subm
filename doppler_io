@@ -1,0 +1,386 @@
+
+## Context
+"""
+This example implements the following aspects of orbit estimation:
+- Simulation of Ios orbit.
+- Modelling of a tracking station on Earth.
+- Simulation of Doppler data at 1 mm/s every 3600 seconds.
+- Use of the simulated data to estimate the planet initial state.
+"""
+
+# Load standard modules
+import numpy as np
+from matplotlib import pyplot as plt
+
+# Load tudatpy modules
+from tudatpy.kernel import constants
+from tudatpy.kernel.interface import spice
+from tudatpy.kernel import numerical_simulation
+from tudatpy.kernel.numerical_simulation import environment_setup
+from tudatpy.kernel.numerical_simulation import propagation_setup
+from tudatpy.kernel.numerical_simulation import estimation, estimation_setup
+from tudatpy.kernel.numerical_simulation.estimation_setup import observation
+from tudatpy.kernel.astro import element_conversion
+from tudatpy.kernel.numerical_simulation import propagation_setup, propagation
+
+
+## Configuration
+"""
+Then, the start and end simulation epochs are setups. In this case, the start epoch is set to `0`, corresponding to the 1st of January 2000.
+The end epoch is set 3 days after.
+"""
+
+# Load spice kernels
+spice.load_standard_kernels()
+
+# Set simulation start and end epochs
+simulation_start_epoch = 0.0
+simulation_end_epoch = 3 * constants.JULIAN_DAY
+
+
+## Environment setup
+
+
+# Create default body settings
+bodies_to_create = ["Earth", "Io", "Jupiter"]
+
+# Create default body settings for bodies_to_create, with "Earth"/"J2000" as the global frame origin and orientation
+global_frame_origin = "SSB"
+global_frame_orientation = "ECLIPJ2000"
+body_settings = environment_setup.get_default_body_settings(
+    bodies_to_create, global_frame_origin, global_frame_orientation)
+
+# Create system of bodies
+bodies = environment_setup.create_system_of_bodies(body_settings)
+
+
+## Propagation setup
+"""
+Now that the environment is created, the propagation itself can be setup.
+
+First, the bodies to be propagated and the central bodies will be defined.
+"""
+
+# Define bodies that are propagated
+bodies_to_propagate = ["Io"]
+
+# Define central bodies of propagation
+central_bodies = ["Jupiter"]
+
+
+### Create the acceleration model
+"""
+The acceleration settings that act on `Io` are now to be defined.
+* Gravitational acceleration using a Point Mass model from:
+    - Jupiter
+"""
+
+# Define the accelerations acting on Io
+accelerations_settings_io = dict(
+    Jupiter=[
+        propagation_setup.acceleration.point_mass_gravity()
+    ])
+
+# Create global accelerations dictionary
+acceleration_settings = {"Io": accelerations_settings_io}
+
+# Create acceleration models
+acceleration_models = propagation_setup.create_acceleration_models(
+    bodies,
+    acceleration_settings,
+    bodies_to_propagate,
+    central_bodies)
+
+
+### Define the initial state
+"""
+The initial state of Io that will be propagated is now defined. 
+"""
+
+# Set the initial state of Io
+#io_gravitational_parameter = bodies.get("Io").gravitational_parameter
+#initial_state = element_conversion.keplerian_to_cartesian_elementwise(
+ #   gravitational_parameter=io_gravitational_parameter,
+ #   semi_major_axis=4.22E8,
+ #   eccentricity=0.0036,
+ #   inclination=np.deg2rad(2.202),
+ #   argument_of_periapsis= 5.879,
+ #   longitude_of_ascending_node= 5.931,
+ #   true_anomaly= 3.722
+#)
+
+initial_state = propagation.get_initial_state_of_bodies(
+    bodies_to_propagate=bodies_to_propagate,
+    central_bodies=central_bodies,
+    body_system=bodies,
+    initial_time=simulation_start_epoch,
+)
+print(initial_state)
+
+### Create the propagator settings
+"""
+The propagator is finally setup.
+First, a termination condition is defined so that the propagation will stop when the end epochs that was defined is reached.
+Then, the translational propagation settings are defined. These are used to simulate the orbit of `Io` around Jupiter.
+"""
+
+# Create termination settings
+termination_condition = propagation_setup.propagator.time_termination(simulation_end_epoch)
+
+# Create propagation settings
+propagator_settings = propagation_setup.propagator.translational(
+    central_bodies,
+    acceleration_models,
+    bodies_to_propagate,
+    initial_state,
+    termination_condition
+)
+
+
+### Create the integrator settings
+"""
+The last step before starting the simulation is to setup the integrator that will be used.
+In this case, a RKF78 integrator is used with a step fixed at 3600 seconds.
+"""
+
+# Create numerical integrator settings
+integrator_settings = propagation_setup.integrator.runge_kutta_variable_step_size(
+    simulation_start_epoch, 3600.0, propagation_setup.integrator.rkf_78, 3600.0, 3600.0, 1.0, 1.0
+)
+
+
+## Observation Setup
+
+
+### Add a ground station
+"""
+In order to simulate observations, which are required for an estimation of the system parameters, the simulation environment has to be extended by a ground station model.
+In this case, the ground station is located in Delft, at an altitude of 0m, 52.00667°N, 4.35556°E.
+"""
+
+# Define the position of the ground station on Earth
+station_altitude = 0.0
+delft_latitude = np.deg2rad(52.00667)
+delft_longitude = np.deg2rad(4.35556)
+
+# Add the ground station to the environment
+environment_setup.add_ground_station(
+    bodies.get_body("Earth"),
+    "TrackingStation",
+    [station_altitude, delft_latitude, delft_longitude],
+    element_conversion.geodetic_position_type)
+
+
+### Define Observation Links and Types
+"""
+Using the observation module, links can be established between environment members such as the Earth ground station and Io.
+In order to fully define an observation model for a given link, observation model settings have to be created for the desired observable type.
+In this example we use the `one_way_open_loop_doppler()` function for the one-way open-loop Doppler observable type.
+"""
+
+# Define the uplink link ends for one-way observable
+link_ends = dict()
+link_ends[observation.transmitter] = ("Earth", "TrackingStation")
+link_ends[observation.receiver] = ("Io", "")
+
+# Create observation settings for each link/observable
+observation_settings_list = [observation.one_way_open_loop_doppler(link_ends)]
+
+
+### Define Observation Simulation Settings
+"""
+
+In the following cell the settings for the simulation of the observations from the previously defined observation models are defined.
+For each observation model, the observation simulation settings set the times at which observations are simulated and defines the viability criteria and noise of the observation.
+
+"""
+
+# Define observation simulation times for each link (separated by steps of 1 hour)
+observation_times = np.arange(simulation_start_epoch, simulation_end_epoch, 3600.0)
+observation_simulation_settings = observation.tabulated_simulation_settings(
+    observation.one_way_doppler_type,
+    link_ends,
+    observation_times
+)
+
+# Add noise levels of roughly 3.3E-12 [s/m] and add this as Gaussian noise to the observation
+noise_level = 1.0E-3 / constants.SPEED_OF_LIGHT
+observation.add_gaussian_noise_to_settings(
+    [observation_simulation_settings],
+    noise_level,
+    observation.one_way_doppler_type
+)
+
+# Create viability settings
+
+
+
+
+## Estimation Setup
+"""
+After the setup of the observations, let's now setup the estimation.
+"""
+
+
+### Defining the estimatable parameters
+"""
+
+The estimation of system parameters requires the equations of the dynamical and observational models to be differentiated w.r.t. the estimatable system parameters, resulting in the so-called Variational Equations.
+In the following cell, the set of estimatable parameters is defined. The initial state of Io is included as estimatable parameters.
+During the creation of the Estimator object, the parameter set will be used to automatically set up the Variational Equations of the simulated orbit and the observations thereof.
+"""
+
+# Setup parameters settings to propagate the state transition matrix
+parameter_settings = estimation_setup.parameter.initial_states(propagator_settings, bodies)
+
+
+# Create the parameters that will be estimated
+parameters_to_estimate = estimation_setup.create_parameter_set(parameter_settings, bodies)
+
+
+### Creating the Estimator object
+"""
+
+The Estimator object consolidates all the information that is required for the estimation of system parameters:
+    * the environment (bodies)
+    * the parameter set (parameters_to_estimate)
+    * observation models (observation_settings_list)
+    * integrator setup (integrator_settings)
+    * dynamical and numerical setup (propagator_settings)
+
+The Estimator object automatically creates the relevant Variational Equations and Observation Simulators, which are required for the parameter estimation and observation simulation, respectively.
+
+"""
+
+# Create the estimation object
+estimator = numerical_simulation.Estimator(
+    bodies,
+    parameters_to_estimate,
+    observation_settings_list,
+    integrator_settings,
+    propagator_settings)
+
+
+### Perform the observations simulation
+"""
+Now that the Estimator object exists, we can make use of its observation simulator members.
+The observation simulations are performed by calling the `simulation_observations()` function from the `observation` module.
+"""
+
+# Simulate required observation
+simulated_observations = estimation.simulate_observations(
+    [observation_simulation_settings],
+    estimator.observation_simulators,
+    bodies)
+
+
+## Estimate the parameters
+"""
+With the simulated observations and the Estimator object, containing the Variational Equations for the estimatable parameters, 
+we now have everything we need in order to conduct the estimation of the parameters.
+"""
+
+
+### Setup the inversion
+"""
+Here we collect all inputs required for the inversion in a Pod (Precise orbit determination) 
+input object and define some basic settings of the inversion.
+"""
+
+# Save the true parameters to later analyse the error
+truth_parameters = parameters_to_estimate.parameter_vector
+
+# Create input object for estimation, adding observations and parameter set information
+pod_input = estimation.PodInput(
+    simulated_observations, parameters_to_estimate.parameter_set_size)
+
+# set methodological options
+pod_input.define_estimation_settings(
+    reintegrate_variational_equations=False)
+
+# define weighting of the observations in the inversion
+weights_per_observable = {estimation_setup.observation.one_way_doppler_type: noise_level ** -2}
+pod_input.set_constant_weight_per_observable(weights_per_observable)
+
+
+### Perform the estimation
+"""
+Finally, let's run the estimation itself, using the inputs that have been defined earlier.
+"""
+
+# Perform estimation (this also prints the residuals and partials)
+pod_output = estimator.perform_estimation(pod_input)
+
+
+# Print the estimation error
+print(pod_output.formal_errors)
+print(truth_parameters - parameters_to_estimate.parameter_vector)
+
+
+## Results post-processing
+"""
+Let's now process the results of the estimation and observations.
+"""
+
+
+### Correlation
+"""
+First, let's plot the correlation between the outputs of the estimation.
+"""
+
+plt.figure(figsize=(9,5))
+plt.imshow(np.abs(pod_output.correlations), aspect='auto', interpolation='none')
+plt.colorbar()
+plt.tight_layout()
+plt.show()
+
+
+### Range rate over time
+"""
+Let's now make a plot of the observations range rate over time.
+"""
+
+observation_times = np.array(simulated_observations.concatenated_times)
+observations_list = np.array(simulated_observations.concatenated_observations)
+
+plt.figure(figsize=(9, 5))
+plt.title("Observations as a function of time.")
+plt.scatter(observation_times / 3600.0, observations_list * constants.SPEED_OF_LIGHT)
+plt.xlabel("Time [hr]")
+plt.ylabel("Range rate [m/s]")
+plt.grid()
+plt.tight_layout()
+plt.show()
+
+
+### Residuals history
+"""
+The history of residuals from the estimation can also been analysed by plotting their history.
+"""
+
+residual_history = pod_output.residual_history
+fig, ((ax1, ax2), (ax3, ax4), (ax5, ax6)) = plt.subplots(3, 2, figsize=(9, 11))
+subplots_list = [ax1, ax2, ax3, ax4, ax5]
+
+
+for i in range(5):
+    subplots_list[i].scatter(observation_times, residual_history[:, i])
+plt.tight_layout()
+plt.show()
+
+
+### Final residuals
+"""
+Finally, we can analyse the final residuals, print them, and plot them.
+"""
+
+print(pod_output.formal_errors / (truth_parameters - parameters_to_estimate.parameter_vector))
+final_residuals = pod_output.final_residuals
+
+plt.figure(figsize=(9,5))
+plt.hist(final_residuals, 25)
+plt.tight_layout()
+plt.show()
+
+
+
