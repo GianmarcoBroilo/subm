@@ -98,16 +98,6 @@ The initial state of Io that will be propagated is now defined.
 """
 
 # Set the initial state of Io
-#io_gravitational_parameter = bodies.get("Io").gravitational_parameter
-#initial_state = element_conversion.keplerian_to_cartesian_elementwise(
- #   gravitational_parameter=io_gravitational_parameter,
- #   semi_major_axis=4.22E8,
- #   eccentricity=0.0036,
- #   inclination=np.deg2rad(2.202),
- #   argument_of_periapsis= 5.879,
- #   longitude_of_ascending_node= 5.931,
- #   true_anomaly= 3.722
-#)
 
 initial_state = propagation.get_initial_state_of_bodies(
     bodies_to_propagate=bodies_to_propagate,
