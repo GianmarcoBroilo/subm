@@ -35,21 +35,29 @@ spice.load_standard_kernels()
 
 # Set simulation start and end epochs
 simulation_start_epoch = 0.0
-simulation_end_epoch = 3 * constants.JULIAN_DAY
+simulation_end_epoch = 4 * constants.JULIAN_DAY
 
 
 ## Environment setup
 
 
 # Create default body settings
-bodies_to_create = ["Earth", "Io", "Jupiter"]
+bodies_to_create = ["Earth", "Io", "Jupiter","Europa","Ganymede","Callisto"]
 
-# Create default body settings for bodies_to_create, with "Earth"/"J2000" as the global frame origin and orientation
-global_frame_origin = "SSB"
+time_step = 60
+initial_time = simulation_start_epoch - 5*time_step
+final_time = simulation_end_epoch + 5*time_step
+
+# Create default body settings for bodies_to_create, with "Jupiter"/"J2000" as the global frame origin and orientation
+global_frame_origin = "Jupiter"
 global_frame_orientation = "J2000"
 body_settings = environment_setup.get_default_body_settings(
     bodies_to_create, global_frame_origin, global_frame_orientation)
 
+original_io_ephemeris_settings = body_settings.get("Io").ephemeris_settings
+body_settings.get("Io").ephemeris_settings = environment_setup.ephemeris.tabulated_from_existing(
+    original_io_ephemeris_settings,initial_time, final_time, time_step
+)
 # Create system of bodies
 bodies = environment_setup.create_system_of_bodies(body_settings)
 
@@ -73,13 +81,24 @@ central_bodies = ["Jupiter"]
 The acceleration settings that act on `Io` are now to be defined.
 * Gravitational acceleration using a Point Mass model from:
     - Jupiter
+    - Europa, Ganymede, Callisto 
 """
 
 # Define the accelerations acting on Io
 accelerations_settings_io = dict(
     Jupiter=[
         propagation_setup.acceleration.point_mass_gravity()
-    ])
+    ],
+    Europa=[
+        propagation_setup.acceleration.point_mass_gravity()
+    ],
+    Ganymede=[
+        propagation_setup.acceleration.point_mass_gravity()
+    ],
+    Callisto=[
+        propagation_setup.acceleration.point_mass_gravity()
+    ],
+)
 
 # Create global accelerations dictionary
 acceleration_settings = {"Io": accelerations_settings_io}
@@ -98,14 +117,14 @@ The initial state of Io that will be propagated is now defined.
 """
 
 # Set the initial state of Io
-
 initial_state = propagation.get_initial_state_of_bodies(
     bodies_to_propagate=bodies_to_propagate,
     central_bodies=central_bodies,
     body_system=bodies,
     initial_time=simulation_start_epoch,
 )
-print(initial_state)
+
+
 
 ### Create the propagator settings
 """
@@ -127,6 +146,7 @@ propagator_settings = propagation_setup.propagator.translational(
 )
 
 
+
 ### Create the integrator settings
 """
 The last step before starting the simulation is to setup the integrator that will be used.
@@ -135,7 +155,7 @@ In this case, a RKF78 integrator is used with a step fixed at 3600 seconds.
 
 # Create numerical integrator settings
 integrator_settings = propagation_setup.integrator.runge_kutta_variable_step_size(
-    simulation_start_epoch, 3600.0, propagation_setup.integrator.rkf_78, 3600.0, 3600.0, 1.0, 1.0
+    simulation_start_epoch, 60.0, propagation_setup.integrator.rkf_78, 60.0, 60.0, 1.0, 1.0
 )
 
 
@@ -181,17 +201,19 @@ observation_settings_list = [observation.one_way_open_loop_doppler(link_ends)]
 """
 
 In the following cell the settings for the simulation of the observations from the previously defined observation models are defined.
-For each observation model, the observation simulation settings set the times at which observations are simulated and defines the viability criteria and noise of the observation.
+For each observation model, the observation simulation settings set the times at which observations are simulated and defines the 
+viability criteria and noise of the observation.
 
 """
 
 # Define observation simulation times for each link (separated by steps of 1 hour)
-observation_times = np.arange(simulation_start_epoch, simulation_end_epoch, 3600.0)
+observation_times = np.arange(simulation_start_epoch, simulation_end_epoch, 60.0)
 observation_simulation_settings = observation.tabulated_simulation_settings(
     observation.one_way_doppler_type,
     link_ends,
     observation_times
 )
+
 
 # Add noise levels of roughly 3.3E-12 [s/m] and add this as Gaussian noise to the observation
 noise_level = 1.0E-3 / constants.SPEED_OF_LIGHT
@@ -202,8 +224,10 @@ observation.add_gaussian_noise_to_settings(
 )
 
 # Create viability settings
-
-
+viability_setting = observation.elevation_angle_viability(["Earth", "TrackingStation"], np.deg2rad(15))
+observation.add_viability_check_to_settings(
+    [observation_simulation_settings],
+    [viability_setting])
 
 
 ## Estimation Setup
@@ -215,9 +239,11 @@ After the setup of the observations, let's now setup the estimation.
 ### Defining the estimatable parameters
 """
 
-The estimation of system parameters requires the equations of the dynamical and observational models to be differentiated w.r.t. the estimatable system parameters, resulting in the so-called Variational Equations.
+The estimation of system parameters requires the equations of the dynamical and observational models to be differentiated w.r.t. 
+the estimatable system parameters, resulting in the so-called Variational Equations.
 In the following cell, the set of estimatable parameters is defined. The initial state of Io is included as estimatable parameters.
-During the creation of the Estimator object, the parameter set will be used to automatically set up the Variational Equations of the simulated orbit and the observations thereof.
+During the creation of the Estimator object, the parameter set will be used to automatically set up the Variational Equations of the 
+simulated orbit and the observations thereof.
 """
 
 # Setup parameters settings to propagate the state transition matrix
@@ -238,9 +264,11 @@ The Estimator object consolidates all the information that is required for the e
     * integrator setup (integrator_settings)
     * dynamical and numerical setup (propagator_settings)
 
-The Estimator object automatically creates the relevant Variational Equations and Observation Simulators, which are required for the parameter estimation and observation simulation, respectively.
+The Estimator object automatically creates the relevant Variational Equations and Observation Simulators, which are required 
+for the parameter estimation and observation simulation, respectively.
 
 """
+
 
 # Create the estimation object
 estimator = numerical_simulation.Estimator(
@@ -315,14 +343,15 @@ Let's now process the results of the estimation and observations.
 
 ### Correlation
 """
-First, let's plot the correlation between the outputs of the estimation.
+Let's plot the correlation between the outputs of the estimation.
 """
 
 plt.figure(figsize=(9,5))
 plt.imshow(np.abs(pod_output.correlations), aspect='auto', interpolation='none')
+plt.title("Correlation between the outputs")
 plt.colorbar()
 plt.tight_layout()
-plt.show()
+#plt.show()
 
 
 ### Range rate over time
@@ -334,10 +363,10 @@ observation_times = np.array(simulated_observations.concatenated_times)
 observations_list = np.array(simulated_observations.concatenated_observations)
 
 plt.figure(figsize=(9, 5))
-plt.title("Observations as a function of time.")
-plt.scatter(observation_times / 3600.0, observations_list * constants.SPEED_OF_LIGHT)
+plt.title("Observations as a function of time")
+plt.scatter(observation_times / 3600.0, observations_list * constants.SPEED_OF_LIGHT, color ='red')
 plt.xlabel("Time [hr]")
-plt.ylabel("Range rate [m/s]")
+plt.ylabel("Range Rate [m/s]")
 plt.grid()
 plt.tight_layout()
 plt.show()
@@ -354,9 +383,9 @@ subplots_list = [ax1, ax2, ax3, ax4, ax5]
 
 
 for i in range(5):
-    subplots_list[i].scatter(observation_times, residual_history[:, i])
+    subplots_list[i].scatter(observation_times/3600, residual_history[:, i])
 plt.tight_layout()
-plt.show()
+#plt.show()
 
 
 ### Final residuals
@@ -366,11 +395,16 @@ Finally, we can analyse the final residuals, print them, and plot them.
 
 print(pod_output.formal_errors / (truth_parameters - parameters_to_estimate.parameter_vector))
 final_residuals = pod_output.final_residuals
+rms = np.sqrt(np.mean(final_residuals))
 
 plt.figure(figsize=(9,5))
-plt.hist(final_residuals, 25)
+#plt.hist(final_residuals, 25)
+plt.scatter(observation_times/3600, final_residuals, marker='x', color = 'black')
+plt.axhline(y=0,color='r', linestyle = '-')
+plt.title("Final residuals")
 plt.tight_layout()
 plt.show()
+
 
 
 
