@@ -4,7 +4,7 @@
 This example implements the following aspects of orbit estimation:
 - Simulation of Ios orbit.
 - Modelling of a tracking station on Earth.
-- Simulation of Doppler data at 1 mm/s every 3600 seconds.
+- Simulation of Doppler data at 1 mm/s every 60 seconds for a period of 3 days.
 - Use of the simulated data to estimate the planet initial state.
 """
 
