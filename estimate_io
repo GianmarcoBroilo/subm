@@ -186,3 +186,8 @@ estimator = numerical_simulation.Estimator(
     integrator_settings,
     propagator_settings)
 
+# Simulate required observation
+simulated_observations = estimation.simulate_observations(
+    [observation_simulation_settings],
+    estimator.observation_simulators,
+    bodies)
