@@ -1,6 +1,11 @@
 ## Context
 """
-
+INPUT
+Data type: stellar occultation of Io
+A priori cov: uncertainties in the state of Io in RSW
+parameters: initial state of Io
+OUTPUT
+cov: uncertainty and correlation of estimated parameters
 """
 
 # Load standard modules
@@ -122,22 +127,22 @@ parameter_settings = estimation_setup.parameter.initial_states(propagator_settin
 # Create the parameters that will be estimated
 parameters_to_estimate = estimation_setup.create_parameter_set(parameter_settings, bodies)
 
-    # Create numerical integrator settings.
+# Create numerical integrator settings.
 fixed_step_size = 3600.0
 integrator_settings = propagation_setup.integrator.runge_kutta_4(
     simulation_start_epoch, fixed_step_size
 )
 
 # Create the variational equation solver and propagate the dynamics
-#variational_equations_solver = numerical_simulation.SingleArcVariationalSimulator(
-#    bodies, integrator_settings, propagator_settings, parameters_to_estimate, integrate_on_creation=True)
+variational_equations_solver = numerical_simulation.SingleArcVariationalSimulator(
+    bodies, integrator_settings, propagator_settings, parameters_to_estimate, integrate_on_creation=True)
 
 # Extract the resulting state history, state transition matrix history, and sensitivity matrix history
-#states = variational_equations_solver.state_history
+states = variational_equations_solver.state_history
 #state_transition_matrices = variational_equations_solver.state_transition_matrix_history
 #sensitivity_matrices = variational_equations_solver.sensitivity_matrix_history
 
-#states_array = result2array(states)
+states_array = result2array(states)
 #state_dframe = pd.DataFrame(data=states_array,columns ="t x y z vx vy vz".split())
 
 """"
@@ -163,20 +168,32 @@ link_ends[observation.receiver] = ("Io", "")
 
 
 # Create observation settings for each link/observable
-observation_settings_list = [observation.cartesian_position(link_ends)]
+observation_settings_list = [observation.one_way_open_loop_doppler(link_ends)]
 
 ### Define Observation Simulation Settings
-# Define observation simulation times for each link (separated by steps of 1 hour)
+# Define observation simulation times for each link: 1 stellar occultation
 observation_times = np.arange(simulation_start_epoch, simulation_end_epoch, 3600.0)
 observation_simulation_settings = observation.tabulated_simulation_settings(
-    observation.cartesian_position(link_ends),
+    observation.one_way_doppler_type,
     link_ends,
     observation_times
+)
+# Add noise levels of roughly 3.3E-12 [s/m] and add this as Gaussian noise to the observation
+noise_level = 1.0E-3 / constants.SPEED_OF_LIGHT
+observation.add_gaussian_noise_to_settings(
+    [observation_simulation_settings],
+    noise_level,
+    observation.one_way_doppler_type
 )
 
 """"
 Estimation setup 
 """
+# Define a priori uncertainty 15km on positions, for velocity in RSW: 0.15 m/s 1.15 m/s 0.75 m/s
+print(states_array)
+uncertainties_rsw = 15e3*np.ones(3)
+rotation_rsw_to_inertial = frame_conversion.rsw_to_inertial_rotation_matrix(states_array)
+uncertainties_inertial = rotation_rsw_to_inertial*uncertainties_rsw
 
 # Create the estimation object
 estimator = numerical_simulation.Estimator(
@@ -191,3 +208,37 @@ simulated_observations = estimation.simulate_observations(
     [observation_simulation_settings],
     estimator.observation_simulators,
     bodies)
+
+# Collect all inputs for the inversion in a Precise Orbit Determination object
+truth_parameters = parameters_to_estimate.parameter_vector
+pod_input = estimation.PodInput(
+    simulated_observations, parameters_to_estimate.parameter_set_size, inverse_apriori_covariance= uncertainties_inertial)
+
+pod_input.define_estimation_settings(
+    reintegrate_variational_equations=False)
+
+# Setup the weight matrix W (for first case assume W = 1)
+weights_per_observable = \
+    {estimation_setup.observation.one_way_doppler_type: noise_level ** -2}
+pod_input.set_constant_weight_per_observable(weights_per_observable)
+
+""""
+Run the estimation
+"""
+# Perform estimation (this also prints the residuals and partials)
+pod_output = estimator.perform_estimation(pod_input)
+
+
+# Print the estimation error
+print(pod_output.formal_errors)
+print(truth_parameters - parameters_to_estimate.parameter_vector)
+
+
+""""
+Post process the results 
+"""
+
+
+# Plot the correlation between the outputs of the estimation
+
+# Plot the uncertainty in right ascension and declination of Io w.r.t Earth
