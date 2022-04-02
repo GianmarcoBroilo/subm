@@ -32,7 +32,7 @@ spice.load_standard_kernels()
 
 # Set simulation start and end epochs
 simulation_start_epoch = 0.0
-simulation_end_epoch = 5 * constants.JULIAN_YEAR
+simulation_end_epoch = 1 * constants.JULIAN_YEAR
 
 
 ## Environment setup
@@ -134,15 +134,15 @@ integrator_settings = propagation_setup.integrator.runge_kutta_4(
 )
 
 # Create the variational equation solver and propagate the dynamics
-variational_equations_solver = numerical_simulation.SingleArcVariationalSimulator(
-    bodies, integrator_settings, propagator_settings, parameters_to_estimate, integrate_on_creation=True)
+#variational_equations_solver = numerical_simulation.SingleArcVariationalSimulator(
+#    bodies, integrator_settings, propagator_settings, parameters_to_estimate, integrate_on_creation=True)
 
 # Extract the resulting state history, state transition matrix history, and sensitivity matrix history
-states = variational_equations_solver.state_history
+#states = variational_equations_solver.state_history
 #state_transition_matrices = variational_equations_solver.state_transition_matrix_history
 #sensitivity_matrices = variational_equations_solver.sensitivity_matrix_history
 
-states_array = result2array(states)
+#states_array = result2array(states)
 #state_dframe = pd.DataFrame(data=states_array,columns ="t x y z vx vy vz".split())
 
 """"
@@ -168,13 +168,13 @@ link_ends[observation.receiver] = ("Io", "")
 
 
 # Create observation settings for each link/observable
-observation_settings_list = [observation.one_way_open_loop_doppler(link_ends)]
+observation_settings_list = [observation.angular_position(link_ends)]
 
 ### Define Observation Simulation Settings
 # Define observation simulation times for each link: 1 stellar occultation
 observation_times = np.arange(simulation_start_epoch, simulation_end_epoch, 3600.0)
 observation_simulation_settings = observation.tabulated_simulation_settings(
-    observation.one_way_doppler_type,
+    observation.angular_position_type,
     link_ends,
     observation_times
 )
@@ -183,17 +183,17 @@ noise_level = 1.0E-3 / constants.SPEED_OF_LIGHT
 observation.add_gaussian_noise_to_settings(
     [observation_simulation_settings],
     noise_level,
-    observation.one_way_doppler_type
+    observation.angular_position_type
 )
 
 """"
 Estimation setup 
 """
 # Define a priori uncertainty 15km on positions, for velocity in RSW: 0.15 m/s 1.15 m/s 0.75 m/s
-print(states_array)
-uncertainties_rsw = 15e3*np.ones(3)
-rotation_rsw_to_inertial = frame_conversion.rsw_to_inertial_rotation_matrix(states_array)
-uncertainties_inertial = rotation_rsw_to_inertial*uncertainties_rsw
+#print(states_array)
+#uncertainties_rsw = 15e3*np.ones(3)
+#rotation_rsw_to_inertial = frame_conversion.rsw_to_inertial_rotation_matrix(states_array)
+#uncertainties_inertial = rotation_rsw_to_inertial*uncertainties_rsw
 
 # Create the estimation object
 estimator = numerical_simulation.Estimator(
@@ -212,14 +212,14 @@ simulated_observations = estimation.simulate_observations(
 # Collect all inputs for the inversion in a Precise Orbit Determination object
 truth_parameters = parameters_to_estimate.parameter_vector
 pod_input = estimation.PodInput(
-    simulated_observations, parameters_to_estimate.parameter_set_size, inverse_apriori_covariance= uncertainties_inertial)
+    simulated_observations, parameters_to_estimate.parameter_set_size)
 
 pod_input.define_estimation_settings(
     reintegrate_variational_equations=False)
 
 # Setup the weight matrix W (for first case assume W = 1)
 weights_per_observable = \
-    {estimation_setup.observation.one_way_doppler_type: noise_level ** -2}
+    {estimation_setup.observation.angular_position_type: noise_level ** -2}
 pod_input.set_constant_weight_per_observable(weights_per_observable)
 
 """"
@@ -240,5 +240,14 @@ Post process the results
 
 
 # Plot the correlation between the outputs of the estimation
+plt.figure(figsize=(9,5))
+plt.imshow(np.abs(pod_output.correlations), aspect='auto', interpolation='none')
+plt.title("Correlation between the outputs")
+plt.colorbar()
+plt.tight_layout()
+plt.show()
 
 # Plot the uncertainty in right ascension and declination of Io w.r.t Earth
+observation_times = np.array(simulated_observations.concatenated_times)
+observations_list = np.array(simulated_observations.concatenated_observations)
+
