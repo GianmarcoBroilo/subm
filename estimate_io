@@ -32,7 +32,7 @@ spice.load_standard_kernels()
 
 # Set simulation start and end epochs
 simulation_start_epoch = 0.0
-simulation_end_epoch = 1 * constants.JULIAN_YEAR
+simulation_end_epoch = 100 * constants.JULIAN_DAY
 
 
 ## Environment setup
@@ -242,12 +242,27 @@ Post process the results
 # Plot the correlation between the outputs of the estimation
 plt.figure(figsize=(9,5))
 plt.imshow(np.abs(pod_output.correlations), aspect='auto', interpolation='none')
-plt.title("Correlation between the outputs")
+plt.title("Correlation between outputs of the estimation")
 plt.colorbar()
 plt.tight_layout()
-plt.show()
+#plt.show()
 
 # Plot the uncertainty in right ascension and declination of Io w.r.t Earth
 observation_times = np.array(simulated_observations.concatenated_times)
 observations_list = np.array(simulated_observations.concatenated_observations)
+right_ascension = simulated_observations.concatenated_observations[::2]
+declination = simulated_observations.concatenated_observations[1::2]
 
+plt.figure(figsize=(9, 5))
+plt.title("Right ascension")
+plt.scatter(observation_times[::2]/(3600*24), right_ascension, color ='red')
+plt.xlabel("Time [days]")
+plt.ylabel("Degrees")
+plt.show()
+
+plt.figure(figsize=(9, 5))
+plt.title("Declinatino")
+plt.scatter(observation_times[::2]/(3600*24), declination, color ='red')
+plt.xlabel("Time [days]")
+plt.ylabel("Degrees")
+plt.show()
