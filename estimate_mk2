@@ -171,12 +171,12 @@ link_ends[observation.receiver] = ("Io", "")
 observation_settings_list = [observation.angular_position(link_ends)]
 
 ### Define Observation Simulation Settings
-# Define observation simulation times for each link: 1 stellar occultation
-observation_times = np.arange(simulation_start_epoch, simulation_end_epoch, 3600.0)
+# Define observation simulation times for each link: 1 stellar occultation at specific time 
+observation_times = simulation_start_epoch + 2*constants.JULIAN_DAY
 observation_simulation_settings = observation.tabulated_simulation_settings(
     observation.angular_position_type,
     link_ends,
-    observation_times
+    [observation_times]
 )
 # Add noise levels of roughly 3.3E-12 [s/m] and add this as Gaussian noise to the observation
 noise_level = 1.0E-3 / constants.SPEED_OF_LIGHT
