@@ -233,13 +233,6 @@ pod_output = estimator.perform_estimation(pod_input)
 print(pod_output.formal_errors)
 print(truth_parameters - parameters_to_estimate.parameter_vector)
 
-# Propagate the covariance matrix
-state_transition = numerical_simulation.estimation.CombinedStateTransitionAndSensitivityMatrixInterface.full_state_transition_sensitivity_at_epoch(observation_times)
-cov_initial = pod_output.covariance
-propagate_cov = estimation.propagate_covariance(initial_covariance= cov_initial,
-    state_tranisition_interface = state_transition,
-    output_times = observation_times
-)
 
 """"
 Post process the results 
@@ -253,3 +246,15 @@ plt.title("Correlation between outputs of the estimation")
 plt.colorbar()
 plt.tight_layout()
 #plt.show()
+
+""""
+Propagate the covariance matrix for prediction
+"""
+
+# Propagate the covariance matrix
+state_transition = numerical_simulation.estimation.CombinedStateTransitionAndSensitivityMatrixInterface.full_state_transition_sensitivity_at_epoch(observation_times)
+cov_initial = pod_output.covariance
+propagate_cov = estimation.propagate_covariance(initial_covariance= cov_initial,
+    state_tranisition_interface = state_transition,
+    output_times = observation_times
+)
