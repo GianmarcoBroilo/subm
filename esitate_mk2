@@ -1,0 +1,255 @@
+## Context
+"""
+INPUT
+Data type: stellar occultation of Io
+A priori cov: uncertainties in the state of Io in RSW
+parameters: initial state of Io
+OUTPUT
+cov: uncertainty and correlation of estimated parameters
+"""
+
+# Load standard modules
+import numpy as np
+from matplotlib import pyplot as plt
+
+# Load tudatpy modules
+from tudatpy.util import result2array
+from tudatpy.kernel import constants
+from tudatpy.kernel.interface import spice
+from tudatpy.kernel import numerical_simulation
+from tudatpy.kernel.numerical_simulation import environment_setup
+from tudatpy.kernel.numerical_simulation import propagation_setup
+from tudatpy.kernel.numerical_simulation import estimation, estimation_setup
+from tudatpy.kernel.numerical_simulation.estimation_setup import observation
+from tudatpy.kernel.astro import element_conversion
+from tudatpy.kernel.astro import element_conversion
+from tudatpy.kernel.numerical_simulation import propagation_setup, propagation
+import pandas as pd
+from tudatpy.kernel.astro import frame_conversion
+
+# Load spice kernels
+spice.load_standard_kernels()
+
+# Set simulation start and end epochs
+simulation_start_epoch = 0.0
+simulation_end_epoch = 10 * constants.JULIAN_DAY
+
+
+## Environment setup
+
+
+# Create default body settings
+bodies_to_create = ["Earth", "Io", "Jupiter"]
+
+time_step = 3600
+initial_time = simulation_start_epoch - 5*time_step
+final_time = simulation_end_epoch + 5*time_step
+
+# Create default body settings for bodies_to_create, with "Jupiter"/"J2000" as the global frame origin and orientation
+global_frame_origin = "Jupiter"
+global_frame_orientation = "J2000"
+body_settings = environment_setup.get_default_body_settings(
+    bodies_to_create, global_frame_origin, global_frame_orientation)
+
+original_io_ephemeris_settings = body_settings.get("Io").ephemeris_settings
+body_settings.get("Io").ephemeris_settings = environment_setup.ephemeris.tabulated_from_existing(
+    original_io_ephemeris_settings,initial_time, final_time, time_step
+)
+# Create system of bodies
+bodies = environment_setup.create_system_of_bodies(body_settings)
+
+
+## Propagation setup
+"""
+Now that the environment is created, the propagation itself can be setup.
+
+First, the bodies to be propagated and the central bodies will be defined.
+"""
+
+# Define bodies that are propagated
+bodies_to_propagate = ["Io"]
+
+# Define central bodies of propagation
+central_bodies = ["Jupiter"]
+
+
+### Create the acceleration model
+"""
+The acceleration settings that act on `Io` are now to be defined.
+* Gravitational acceleration using a Point Mass model from:
+    - Jupiter
+"""
+
+# Define the accelerations acting on Io
+accelerations_settings_io = dict(
+    Jupiter=[
+        propagation_setup.acceleration.point_mass_gravity()
+    ]
+)
+
+# Create global accelerations dictionary
+acceleration_settings = {"Io": accelerations_settings_io}
+
+# Create acceleration models
+acceleration_models = propagation_setup.create_acceleration_models(
+    bodies,
+    acceleration_settings,
+    bodies_to_propagate,
+    central_bodies)
+
+
+### Define the initial state
+"""
+The initial state of Io that will be propagated is now defined. 
+"""
+
+# Set the initial state of Io
+initial_state = propagation.get_initial_state_of_bodies(
+    bodies_to_propagate=bodies_to_propagate,
+    central_bodies=central_bodies,
+    body_system=bodies,
+    initial_time=simulation_start_epoch,
+)
+
+# Create termination settings
+termination_condition = propagation_setup.propagator.time_termination(simulation_end_epoch)
+
+# Create propagation settings
+propagator_settings = propagation_setup.propagator.translational(
+    central_bodies,
+    acceleration_models,
+    bodies_to_propagate,
+    initial_state,
+    termination_condition
+)
+#Setup paramaters settings to propagate the state transition matrix
+parameter_settings = estimation_setup.parameter.initial_states(propagator_settings, bodies)
+# Create the parameters that will be estimated
+parameters_to_estimate = estimation_setup.create_parameter_set(parameter_settings, bodies)
+
+# Create numerical integrator settings.
+fixed_step_size = 3600.0
+integrator_settings = propagation_setup.integrator.runge_kutta_4(
+    simulation_start_epoch, fixed_step_size
+)
+
+# Create the variational equation solver and propagate the dynamics
+#variational_equations_solver = numerical_simulation.SingleArcVariationalSimulator(
+#    bodies, integrator_settings, propagator_settings, parameters_to_estimate, integrate_on_creation=True)
+
+# Extract the resulting state history, state transition matrix history, and sensitivity matrix history
+#states = variational_equations_solver.state_history
+#state_transition_matrices = variational_equations_solver.state_transition_matrix_history
+#sensitivity_matrices = variational_equations_solver.sensitivity_matrix_history
+
+#states_array = result2array(states)
+#state_dframe = pd.DataFrame(data=states_array,columns ="t x y z vx vy vz".split())
+
+""""
+Observation Setup
+"""
+
+# Define the position of the ground station on Earth
+station_altitude = 0.0
+delft_latitude = np.deg2rad(52.00667)
+delft_longitude = np.deg2rad(4.35556)
+
+# Add the ground station to the environment
+environment_setup.add_ground_station(
+    bodies.get_body("Earth"),
+    "TrackingStation",
+    [station_altitude, delft_latitude, delft_longitude],
+    element_conversion.geodetic_position_type)
+
+# Define the uplink link ends for one-way observable
+link_ends = dict()
+link_ends[observation.transmitter] = ("Earth", "TrackingStation")
+link_ends[observation.receiver] = ("Io", "")
+
+
+# Create observation settings for each link/observable
+observation_settings_list = [observation.angular_position(link_ends)]
+
+### Define Observation Simulation Settings
+# Define observation simulation times for each link: 1 stellar occultation
+observation_times = np.arange(simulation_start_epoch, simulation_end_epoch, 3600.0)
+observation_simulation_settings = observation.tabulated_simulation_settings(
+    observation.angular_position_type,
+    link_ends,
+    observation_times
+)
+# Add noise levels of roughly 3.3E-12 [s/m] and add this as Gaussian noise to the observation
+noise_level = 1.0E-3 / constants.SPEED_OF_LIGHT
+observation.add_gaussian_noise_to_settings(
+    [observation_simulation_settings],
+    noise_level,
+    observation.angular_position_type
+)
+
+""""
+Estimation setup 
+"""
+# Define a priori uncertainty 15km on positions, for velocity in RSW: 0.15 m/s 1.15 m/s 0.75 m/s
+#print(states_array)
+#uncertainties_rsw = 15e3*np.ones(3)
+#rotation_rsw_to_inertial = frame_conversion.rsw_to_inertial_rotation_matrix(states_array)
+#uncertainties_inertial = rotation_rsw_to_inertial*uncertainties_rsw
+
+# Create the estimation object
+estimator = numerical_simulation.Estimator(
+    bodies,
+    parameters_to_estimate,
+    observation_settings_list,
+    integrator_settings,
+    propagator_settings)
+
+# Simulate required observation
+simulated_observations = estimation.simulate_observations(
+    [observation_simulation_settings],
+    estimator.observation_simulators,
+    bodies)
+
+# Collect all inputs for the inversion in a Precise Orbit Determination object
+truth_parameters = parameters_to_estimate.parameter_vector
+pod_input = estimation.PodInput(
+    simulated_observations, parameters_to_estimate.parameter_set_size)
+
+pod_input.define_estimation_settings(
+    reintegrate_variational_equations=False)
+
+# Setup the weight matrix W (for first case assume W = 1)
+weights_per_observable = \
+    {estimation_setup.observation.angular_position_type: noise_level ** -2}
+pod_input.set_constant_weight_per_observable(weights_per_observable)
+
+""""
+Run the estimation
+"""
+# Perform estimation (this also prints the residuals and partials)
+pod_output = estimator.perform_estimation(pod_input)
+
+
+# Print the estimation error
+print(pod_output.formal_errors)
+print(truth_parameters - parameters_to_estimate.parameter_vector)
+
+# Propagate the covariance matrix
+state_transition = numerical_simulation.estimation.CombinedStateTransitionAndSensitivityMatrixInterface.full_state_transition_sensitivity_at_epoch(observation_times)
+cov_initial = pod_output.covariance
+propagate_cov = estimation.propagate_covariance(initial_covariance= cov_initial,
+    state_tranisition_interface = state_transition,
+    output_times = observation_times
+)
+
+""""
+Post process the results 
+"""
+
+
+# Plot the correlation between the outputs of the estimation
+plt.figure(figsize=(9,5))
+plt.imshow(np.abs(pod_output.correlations), aspect='auto', interpolation='none')
+plt.title("Correlation between outputs of the estimation")
+plt.colorbar()
+plt.tight_layout()
+#plt.show()
