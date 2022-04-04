@@ -10,6 +10,7 @@ cov: uncertainty and correlation of estimated parameters
 
 # Load standard modules
 import numpy as np
+from numpy import linalg as lalg
 from matplotlib import pyplot as plt
 
 # Load tudatpy modules
@@ -32,7 +33,7 @@ spice.load_standard_kernels()
 
 # Set simulation start and end epochs
 simulation_start_epoch = 0.0
-simulation_end_epoch = 10 * constants.JULIAN_DAY
+simulation_end_epoch = 1 * constants.JULIAN_YEAR
 
 
 ## Environment setup
@@ -134,16 +135,13 @@ integrator_settings = propagation_setup.integrator.runge_kutta_4(
 )
 
 # Create the variational equation solver and propagate the dynamics
-#variational_equations_solver = numerical_simulation.SingleArcVariationalSimulator(
-#    bodies, integrator_settings, propagator_settings, parameters_to_estimate, integrate_on_creation=True)
+variational_equations_solver = numerical_simulation.SingleArcVariationalSimulator(
+    bodies, integrator_settings, propagator_settings, parameters_to_estimate, integrate_on_creation=True)
 
 # Extract the resulting state history, state transition matrix history, and sensitivity matrix history
 #states = variational_equations_solver.state_history
-#state_transition_matrices = variational_equations_solver.state_transition_matrix_history
-#sensitivity_matrices = variational_equations_solver.sensitivity_matrix_history
-
-#states_array = result2array(states)
-#state_dframe = pd.DataFrame(data=states_array,columns ="t x y z vx vy vz".split())
+state_transition_matrix = variational_equations_solver.state_transition_matrix_history
+sensitivity_matrix = variational_equations_solver.sensitivity_matrix_history
 
 """"
 Observation Setup
@@ -171,12 +169,12 @@ link_ends[observation.receiver] = ("Io", "")
 observation_settings_list = [observation.angular_position(link_ends)]
 
 ### Define Observation Simulation Settings
-# Define observation simulation times for each link: 1 stellar occultation at specific time 
-observation_times = simulation_start_epoch + 2*constants.JULIAN_DAY
+# Define observation simulation times for each link: 1 stellar occultation
+observation_times =  np.arange(simulation_start_epoch,simulation_start_epoch + 2*constants.JULIAN_DAY,3600) #2459306.9333333 Julian time
 observation_simulation_settings = observation.tabulated_simulation_settings(
     observation.angular_position_type,
     link_ends,
-    [observation_times]
+    observation_times
 )
 # Add noise levels of roughly 3.3E-12 [s/m] and add this as Gaussian noise to the observation
 noise_level = 1.0E-3 / constants.SPEED_OF_LIGHT
@@ -226,8 +224,9 @@ pod_input.set_constant_weight_per_observable(weights_per_observable)
 Run the estimation
 """
 # Perform estimation (this also prints the residuals and partials)
-pod_output = estimator.perform_estimation(pod_input)
-
+convergence = estimation.estimation_convergence_checker(1)
+pod_output = estimator.perform_estimation(pod_input, convergence_checker=convergence)
+sti = estimator.state_transition_interface
 
 # Print the estimation error
 print(pod_output.formal_errors)
@@ -238,7 +237,6 @@ print(truth_parameters - parameters_to_estimate.parameter_vector)
 Post process the results 
 """
 
-
 # Plot the correlation between the outputs of the estimation
 plt.figure(figsize=(9,5))
 plt.imshow(np.abs(pod_output.correlations), aspect='auto', interpolation='none')
@@ -247,14 +245,16 @@ plt.colorbar()
 plt.tight_layout()
 #plt.show()
 
+
 """"
 Propagate the covariance matrix for prediction
 """
 
 # Propagate the covariance matrix
-state_transition = numerical_simulation.estimation.CombinedStateTransitionAndSensitivityMatrixInterface.full_state_transition_sensitivity_at_epoch(observation_times)
+time = np.arange(simulation_start_epoch, 50*constants.JULIAN_DAY, 86400)
+time = np.ndarray.tolist(time)
+state_transition = sti
 cov_initial = pod_output.covariance
 propagate_cov = estimation.propagate_covariance(initial_covariance= cov_initial,
     state_tranisition_interface = state_transition,
-    output_times = observation_times
-)
+    output_times = time)
