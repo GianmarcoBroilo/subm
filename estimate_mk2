@@ -7,7 +7,7 @@ parameters: initial state of Io
 OUTPUT
 cov: uncertainty and correlation of estimated parameters
 """
-
+#%%
 # Load standard modules
 import numpy as np
 from numpy import linalg as lalg
@@ -23,17 +23,17 @@ from tudatpy.kernel.numerical_simulation import propagation_setup
 from tudatpy.kernel.numerical_simulation import estimation, estimation_setup
 from tudatpy.kernel.numerical_simulation.estimation_setup import observation
 from tudatpy.kernel.astro import element_conversion
-from tudatpy.kernel.astro import element_conversion
 from tudatpy.kernel.numerical_simulation import propagation_setup, propagation
 import pandas as pd
 from tudatpy.kernel.astro import frame_conversion
+
 
 # Load spice kernels
 spice.load_standard_kernels()
 
 # Set simulation start and end epochs
-simulation_start_epoch = 0.0
-simulation_end_epoch = 1 * constants.JULIAN_YEAR
+simulation_start_epoch = 2457023.50
+simulation_end_epoch = simulation_start_epoch +  10* constants.JULIAN_YEAR
 
 
 ## Environment setup
@@ -139,7 +139,7 @@ variational_equations_solver = numerical_simulation.SingleArcVariationalSimulato
     bodies, integrator_settings, propagator_settings, parameters_to_estimate, integrate_on_creation=True)
 
 # Extract the resulting state history, state transition matrix history, and sensitivity matrix history
-#states = variational_equations_solver.state_history
+states = variational_equations_solver.state_history
 state_transition_matrix = variational_equations_solver.state_transition_matrix_history
 sensitivity_matrix = variational_equations_solver.sensitivity_matrix_history
 
@@ -170,7 +170,7 @@ observation_settings_list = [observation.angular_position(link_ends)]
 
 ### Define Observation Simulation Settings
 # Define observation simulation times for each link: 1 stellar occultation
-observation_times =  np.arange(simulation_start_epoch,simulation_start_epoch + 2*constants.JULIAN_DAY,3600) #2459306.9333333 Julian time
+observation_times =  [2458119.50,2459306.93,2459580.50]
 observation_simulation_settings = observation.tabulated_simulation_settings(
     observation.angular_position_type,
     link_ends,
@@ -188,11 +188,21 @@ observation.add_gaussian_noise_to_settings(
 Estimation setup 
 """
 # Define a priori uncertainty 15km on positions, for velocity in RSW: 0.15 m/s 1.15 m/s 0.75 m/s
-#print(states_array)
-#uncertainties_rsw = 15e3*np.ones(3)
-#rotation_rsw_to_inertial = frame_conversion.rsw_to_inertial_rotation_matrix(states_array)
-#uncertainties_inertial = rotation_rsw_to_inertial*uncertainties_rsw
+rotation_rsw_to_inertial_dict = dict()
+for epoch in list(variational_equations_solver.state_history):
+    rotation_rsw_to_inertial_dict[epoch] = frame_conversion.rsw_to_inertial_rotation_matrix(states[epoch]).reshape(3,3)
 
+uncertainties_rsw = np.zeros((3,3))
+np.fill_diagonal(uncertainties_rsw,[15e3,15e3,15e3])
+uncertainties_rsw_velocity = np.zeros((3,3))
+np.fill_diagonal(uncertainties_rsw_velocity,[0.15,1.15,0.75])
+covariance_position_initial = lalg.multi_dot([rotation_rsw_to_inertial_dict[simulation_start_epoch],uncertainties_rsw,rotation_rsw_to_inertial_dict[simulation_start_epoch].T])
+covariance_velocity_initial = lalg.multi_dot([rotation_rsw_to_inertial_dict[simulation_start_epoch],uncertainties_rsw_velocity,rotation_rsw_to_inertial_dict[simulation_start_epoch].T])
+covariance_a_priori = np.block([
+    [covariance_position_initial, np.zeros((3,3))],
+    [np.zeros((3,3)), covariance_velocity_initial]
+])
+covariance_a_priori_inverse = np.linalg.inv(covariance_a_priori)
 # Create the estimation object
 estimator = numerical_simulation.Estimator(
     bodies,
@@ -210,7 +220,7 @@ simulated_observations = estimation.simulate_observations(
 # Collect all inputs for the inversion in a Precise Orbit Determination object
 truth_parameters = parameters_to_estimate.parameter_vector
 pod_input = estimation.PodInput(
-    simulated_observations, parameters_to_estimate.parameter_set_size)
+    simulated_observations, parameters_to_estimate.parameter_set_size, inverse_apriori_covariance=covariance_a_priori_inverse)
 
 pod_input.define_estimation_settings(
     reintegrate_variational_equations=False)
@@ -237,13 +247,7 @@ print(truth_parameters - parameters_to_estimate.parameter_vector)
 Post process the results 
 """
 
-# Plot the correlation between the outputs of the estimation
-plt.figure(figsize=(9,5))
-plt.imshow(np.abs(pod_output.correlations), aspect='auto', interpolation='none')
-plt.title("Correlation between outputs of the estimation")
-plt.colorbar()
-plt.tight_layout()
-#plt.show()
+
 
 
 """"
@@ -251,10 +255,45 @@ Propagate the covariance matrix for prediction
 """
 
 # Propagate the covariance matrix
-time = np.arange(simulation_start_epoch, 50*constants.JULIAN_DAY, 86400)
-time = np.ndarray.tolist(time)
-state_transition = sti
-cov_initial = pod_output.covariance
-propagate_cov = estimation.propagate_covariance(initial_covariance= cov_initial,
-    state_tranisition_interface = state_transition,
-    output_times = time)
+#propagated_dict = dict()
+#time = np.arange(simulation_start_epoch, 50*constants.JULIAN_DAY, 86400)
+#time = np.ndarray.tolist(time)
+#state_transition = sti
+#cov_initial = pod_output.covariance
+#propagated_dict = estimation.propagate_formal_errors(initial_covariance= cov_initial,state_transition_interface = state_transition,output_times = time)
+
+
+covariance_to_propagate = pod_output.covariance
+
+propagated_covariance_dict = dict()
+propagated_covariance_rsw_dict = dict()
+propagated_formal_errors_dict = dict()
+propagated_formal_errors_rsw_dict = dict()
+for epoch in list(variational_equations_solver.state_history):
+    STM = variational_equations_solver.state_transition_matrix_history[epoch]
+    full_STM = STM
+    # return propagated covariance at epoch
+    propagated_covariance_dict[epoch] = lalg.multi_dot([full_STM, covariance_to_propagate, full_STM.transpose()])
+    propagated_formal_errors_dict[epoch] = np.sqrt(np.diag(propagated_covariance_dict[epoch]))
+    propagated_covariance_rsw_dict[epoch] = lalg.multi_dot([rotation_rsw_to_inertial_dict[epoch].T,propagated_covariance_dict[epoch][:3,:3],rotation_rsw_to_inertial_dict[epoch]])
+    propagated_formal_errors_rsw_dict[epoch] = np.sqrt(np.diag(propagated_covariance_dict[epoch]))
+#%%
+time = np.array(list(propagated_formal_errors_rsw_dict))
+values = np.vstack(propagated_formal_errors_rsw_dict.values())
+plt.figure(figsize=(9,5))
+plt.plot(time,values[:,0], label = 'R')
+plt.plot(time,values[:,1], label = 'S')
+plt.plot(time,values[:,2], label = 'W')
+plt.xlim([simulation_start_epoch, simulation_start_epoch + 60*constants.JULIAN_DAY ])
+plt.yscale("log")
+plt.ylabel('Uncertainty $\sigma$ [m]')
+plt.xlabel('Time [s from J2000]')
+plt.legend()
+plt.show()
+
+plt.figure(figsize=(9,5))
+plt.imshow(np.abs(pod_output.correlations), aspect='auto', interpolation='none')
+plt.title("Correlation between the outputs")
+plt.colorbar()
+plt.tight_layout()
+plt.show()
