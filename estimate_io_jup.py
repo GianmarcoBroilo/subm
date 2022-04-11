@@ -59,6 +59,10 @@ original_io_ephemeris_settings = body_settings.get("Io").ephemeris_settings
 body_settings.get("Io").ephemeris_settings = environment_setup.ephemeris.tabulated_from_existing(
     original_io_ephemeris_settings,initial_time, final_time, time_step
 )
+original_jupiter_ephemeris_settings = body_settings.get("Jupiter").ephemeris_settings
+body_settings.get("Jupiter").ephemeris_settings = environment_setup.ephemeris.tabulated_from_existing(
+    original_jupiter_ephemeris_settings,initial_time, final_time, time_step
+)
 # Create system of bodies
 bodies = environment_setup.create_system_of_bodies(body_settings)
 
@@ -82,6 +86,7 @@ for body_name in bodies_to_create:
 
 acceleration_settings_io = dict(
     Jupiter = [propagation_setup.acceleration.point_mass_gravity()],
+    Sun = [propagation_setup.acceleration.point_mass_gravity()]
 )
 acceleration_settings_jup = dict(
     Sun=[propagation_setup.acceleration.point_mass_gravity()],
@@ -160,7 +165,7 @@ for epoch in list(variational_equations_solver.state_history):
 uncertainties_rsw_jup = np.zeros((3,3))
 np.fill_diagonal(uncertainties_rsw_jup,[1e3,1e3,1e3])
 uncertainties_rsw_velocity_jup = np.zeros((3,3))
-np.fill_diagonal(uncertainties_rsw_velocity_io,[0.1,0.1,0.1])
+np.fill_diagonal(uncertainties_rsw_velocity_jup,[0.1,0.1,0.1])
 covariance_position_initial_jup = lalg.multi_dot([rotation_rsw_to_inertial_dict_jup[simulation_start_epoch],uncertainties_rsw_jup,rotation_rsw_to_inertial_dict_jup[simulation_start_epoch].T])
 covariance_velocity_initial_jup = lalg.multi_dot([rotation_rsw_to_inertial_dict_jup[simulation_start_epoch],uncertainties_rsw_velocity_jup,rotation_rsw_to_inertial_dict_jup[simulation_start_epoch].T])
 
@@ -173,7 +178,7 @@ covariance_a_priori = np.block([
     [np.zeros((3,3)),np.zeros((3,3)), covariance_position_initial_jup, np.zeros((3,3))],
     [np.zeros((3,3)),np.zeros((3,3)), np.zeros((3,3)), covariance_velocity_initial_jup],
 ])
-
+covariance_a_priori_inverse = np.linalg.inv(covariance_a_priori)
 """"
 Observation Setup
 """
@@ -191,9 +196,63 @@ environment_setup.add_ground_station(
     element_conversion.geodetic_position_type)
 
 # Define the uplink link ends types
-link_ends = dict()
-link_ends[observation.receiver] = ("Earth", "TrackingStation")
-link_ends[observation.transmitter] = ("Io", "")
-link_ends[observation.transmitter] = ("Jupiter", "")
+link_ends_stellar = dict()
+link_ends_stellar[observation.receiver] = ("Earth", "TrackingStation")
+link_ends_stellar[observation.transmitter] = ("Io", "")
+link_ends_vlbi = dict()
+link_ends_vlbi[observation.receiver] = ("Earth", "TrackingStation")
+link_ends_vlbi [observation.transmitter] = ("Jupiter", "")
 
-# Define the observations
+# Create Bias settings 0.5 nrad in both RA and Dec
+bias_io = observation.absolute_bias(np.array([0.5e-9,0.5e-9]))
+bias_jup = observation.absolute_bias(np.array([0.5e-6,0.5e-6]))
+# Create observation settings for each link/observable
+observation_settings_list_io = [observation.angular_position(link_ends_stellar,bias_settings = bias_io)]
+observation_settings_list_jup = [observation.angular_position(link_ends_vlbi,bias_settings = bias_jup)]
+
+# Define the observations for Io
+observation_times_io =  np.arange(simulation_start_epoch,simulation_end_epoch,86400)
+observation_simulation_settings_io = observation.tabulated_simulation_settings(
+    observation.angular_position_type,
+    link_ends_stellar,
+    observation_times_io
+)
+# Define the observations for Jupiter
+observation_times_jup =  np.arange(simulation_start_epoch,simulation_end_epoch,86400*4)
+observation_simulation_settings_jup = observation.tabulated_simulation_settings(
+    observation.angular_position_type,
+    link_ends_vlbi,
+    observation_times_jup
+)
+
+""""
+Estimation setup
+"""
+#%%
+observation_settings_list = observation_settings_list_io + observation_simulation_settings_jup
+observation_simulation_settings = observation_simulation_settings_io + observation_simulation_settings_jup
+# Create the estimation object
+estimator = numerical_simulation.Estimator(
+    bodies,
+    parameters_to_estimate,
+    observation_settings_list,
+    integrator_settings,
+    propagator_settings)
+
+# Simulate required observation on Io and Jupiter
+simulated_observations = estimation.simulate_observations(
+    [observation_simulation_settings],
+    estimator.observation_simulators,
+    bodies)
+
+# Collect all inputs for the inversion in a POD
+truth_parameters = parameters_to_estimate.parameter_vector
+pod_input = estimation.PodInput(
+    simulated_observations, parameters_to_estimate.parameter_set_size, inverse_apriori_covariance=covariance_a_priori_inverse)
+
+pod_input.define_estimation_settings(
+    reintegrate_variational_equations=False)
+
+
+
+
