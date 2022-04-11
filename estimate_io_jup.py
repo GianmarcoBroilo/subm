@@ -45,7 +45,7 @@ simulation_end_epoch = simulation_start_epoch +  1*constants.JULIAN_YEAR
 # Create default body settings
 bodies_to_create = ["Earth", "Io", "Jupiter","Sun"]
 
-time_step = 1500
+time_step = 3500
 initial_time = simulation_start_epoch - 5*time_step
 final_time = simulation_end_epoch + 5*time_step
 
@@ -55,6 +55,7 @@ global_frame_orientation = "J2000"
 body_settings = environment_setup.get_default_body_settings(
     bodies_to_create, global_frame_origin, global_frame_orientation)
 
+# Create tabulated settings fo Io and Jupiter
 original_io_ephemeris_settings = body_settings.get("Io").ephemeris_settings
 body_settings.get("Io").ephemeris_settings = environment_setup.ephemeris.tabulated_from_existing(
     original_io_ephemeris_settings,initial_time, final_time, time_step
@@ -129,7 +130,7 @@ parameter_settings = estimation_setup.parameter.initial_states(propagator_settin
 parameters_to_estimate = estimation_setup.create_parameter_set(parameter_settings, bodies)
 
 # Create numerical integrator settings.
-fixed_step_size = 1500.0
+fixed_step_size = 3500.0
 integrator_settings = propagation_setup.integrator.runge_kutta_4(
     simulation_start_epoch, fixed_step_size
 )
@@ -146,6 +147,7 @@ sensitivity_matrix = variational_equations_solver.sensitivity_matrix_history
 Define the a priori covariance of Io 
 """
 #%%
+#15km RSW position 0.15,1.15,0.75m/s RSW velocity
 rotation_rsw_to_inertial_dict_io = dict()
 for epoch in list(variational_equations_solver.state_history):
     rotation_rsw_to_inertial_dict_io[epoch] = frame_conversion.rsw_to_inertial_rotation_matrix(states[epoch][:6]).reshape(3,3)
@@ -159,6 +161,7 @@ covariance_velocity_initial_io = lalg.multi_dot([rotation_rsw_to_inertial_dict_i
 """"
 Define the a priori covariance of Jupiter 
 """
+# 1km RSW position 0.1m/s RSW velocity
 rotation_rsw_to_inertial_dict_jup = dict()
 for epoch in list(variational_equations_solver.state_history):
     rotation_rsw_to_inertial_dict_jup[epoch] = frame_conversion.rsw_to_inertial_rotation_matrix(states[epoch][6:12]).reshape(3,3)
@@ -204,11 +207,12 @@ link_ends_vlbi[observation.receiver] = ("Earth", "TrackingStation")
 link_ends_vlbi [observation.transmitter] = ("Jupiter", "")
 
 # Create Bias settings 0.5 nrad in both RA and Dec
-bias_io = observation.absolute_bias(np.array([0.5e-9,0.5e-9]))
-bias_jup = observation.absolute_bias(np.array([0.5e-6,0.5e-6]))
+bias_io = observation.absolute_bias(np.array([0.5e-6,0.5e-6]))
+bias_jup = observation.absolute_bias(np.array([0.5e-12,0.5e-12]))
+
 # Create observation settings for each link/observable
-observation_settings_list_io = [observation.angular_position(link_ends_stellar,bias_settings = bias_io)]
-observation_settings_list_jup = [observation.angular_position(link_ends_vlbi,bias_settings = bias_jup)]
+observation_settings_list_io = observation.angular_position(link_ends_stellar,bias_settings = bias_io)
+observation_settings_list_jup = observation.angular_position(link_ends_vlbi,bias_settings = bias_jup)
 
 # Define the observations for Io
 observation_times_io =  np.arange(simulation_start_epoch,simulation_end_epoch,86400)
@@ -218,20 +222,38 @@ observation_simulation_settings_io = observation.tabulated_simulation_settings(
     observation_times_io
 )
 # Define the observations for Jupiter
-observation_times_jup =  np.arange(simulation_start_epoch,simulation_end_epoch,86400*4)
+observation_times_jup =  np.arange(simulation_start_epoch,simulation_end_epoch,86400)
 observation_simulation_settings_jup = observation.tabulated_simulation_settings(
     observation.angular_position_type,
     link_ends_vlbi,
     observation_times_jup
 )
-
+# Add noise levels of roughly 05 nrad to Io
+noise_level_io = 0.5e-9
+observation.add_gaussian_noise_to_settings(
+    [observation_simulation_settings_io],
+    noise_level_io,
+    observation.angular_position_type
+)
+# Add noise levels of roughly 05 nrad to Jupiter
+noise_level_jup = 0.5e-12
+observation.add_gaussian_noise_to_settings(
+    [observation_simulation_settings_jup],
+    noise_level_jup,
+    observation.angular_position_type
+)
 """"
 Estimation setup
 """
 #%%
-observation_settings_list = observation_settings_list_io + observation_simulation_settings_jup
-observation_simulation_settings = observation_simulation_settings_io + observation_simulation_settings_jup
-# Create the estimation object
+observation_settings_list = []
+observation_settings_list.append(observation_settings_list_io)
+observation_settings_list.append(observation_settings_list_jup)
+observation_simulation_settings = []
+observation_simulation_settings.append(observation_simulation_settings_io)
+observation_simulation_settings.append(observation_simulation_settings_jup)
+
+# Create the estimation object for Io and Jupiter
 estimator = numerical_simulation.Estimator(
     bodies,
     parameters_to_estimate,
@@ -241,7 +263,7 @@ estimator = numerical_simulation.Estimator(
 
 # Simulate required observation on Io and Jupiter
 simulated_observations = estimation.simulate_observations(
-    [observation_simulation_settings],
+    observation_simulation_settings,
     estimator.observation_simulators,
     bodies)
 
@@ -253,6 +275,83 @@ pod_input = estimation.PodInput(
 pod_input.define_estimation_settings(
     reintegrate_variational_equations=False)
 
+# Setup the weight matrix W (for first case assume W = 1)
+weights_per_observable = \
+    {estimation_setup.observation.angular_position_type: noise_level_jup ** -2}
+pod_input.set_constant_weight_per_observable(weights_per_observable)
+
+""""
+Run the estimation
+"""
+# Perform estimation (this also prints the residuals and partials)
+convergence = estimation.estimation_convergence_checker(1)
+pod_output = estimator.perform_estimation(pod_input, convergence_checker=convergence)
 
 
 
+""""
+Post process the results 
+"""
+plt.figure(figsize=(9,5))
+plt.imshow(np.abs(pod_output.correlations), aspect='auto', interpolation='none')
+plt.title("Correlation between the outputs")
+plt.colorbar()
+plt.tight_layout()
+plt.show()
+
+
+
+""""
+Propagate the covariance matrix for prediction
+"""
+#%%
+covariance_to_propagate = pod_output.covariance
+propagated_covariance_dict = dict()
+propagated_covariance_rsw_dict_io = dict()
+propagated_covariance_rsw_dict_jup = dict()
+propagated_formal_errors_dict = dict()
+propagated_formal_errors_rsw_dict_io = dict()
+propagated_formal_errors_rsw_dict_jup = dict()
+
+for epoch in list(variational_equations_solver.state_history):
+    STM = variational_equations_solver.state_transition_matrix_history[epoch]
+    full_STM = STM
+    # return propagated covariance at epoch
+    propagated_covariance_dict[epoch] = lalg.multi_dot([full_STM, covariance_to_propagate, full_STM.transpose()])
+    propagated_covariance_rsw_dict_io[epoch] = lalg.multi_dot([rotation_rsw_to_inertial_dict_io[epoch].T,propagated_covariance_dict[epoch][:3,:3],rotation_rsw_to_inertial_dict_io[epoch]])
+    propagated_formal_errors_rsw_dict_io[epoch] = np.sqrt(np.diag(propagated_covariance_rsw_dict_io[epoch]))
+    propagated_covariance_rsw_dict_jup[epoch] = lalg.multi_dot([rotation_rsw_to_inertial_dict_jup[epoch].T,propagated_covariance_dict[epoch][6:9,6:9],rotation_rsw_to_inertial_dict_jup[epoch]])
+    propagated_formal_errors_rsw_dict_jup[epoch] = np.sqrt(np.diag(propagated_covariance_rsw_dict_jup[epoch]))
+
+#%%
+""""
+Plot the propagated uncertainties  
+"""
+
+time_io = np.array(list(propagated_formal_errors_rsw_dict_io))
+time_jup = np.array(list(propagated_formal_errors_rsw_dict_jup))
+values_io = np.vstack(propagated_formal_errors_rsw_dict_io.values())
+values_jup = np.vstack(propagated_formal_errors_rsw_dict_jup.values())
+plt.figure(figsize=(9,5))
+plt.plot(time_io/86400,values_io[:,0], label = 'R')
+plt.plot(time_io/86400,values_io[:,1], label = 'S')
+plt.plot(time_io/86400,values_io[:,2], label = 'W')
+plt.yscale("log")
+plt.grid(True, which="both", ls="-")
+plt.title("Propagation of $\sigma$ along radial, along-track and cross-track directions Io")
+plt.ylabel('Uncertainty $\sigma$ [m]')
+plt.xlabel('Time [Days]')
+plt.legend()
+plt.show()
+
+plt.figure(figsize=(9,5))
+plt.plot(time_jup/86400,values_jup[:,0], label = 'R')
+plt.plot(time_jup/86400,values_jup[:,1], label = 'S')
+plt.plot(time_jup/86400,values_jup[:,2], label = 'W')
+plt.yscale("log")
+plt.grid(True, which="both", ls="-")
+plt.title("Propagation of $\sigma$ along radial, along-track and cross-track directions Jupiter")
+plt.ylabel('Uncertainty $\sigma$ [m]')
+plt.xlabel('Time [Days]')
+plt.legend()
+plt.show()
