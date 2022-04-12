@@ -208,21 +208,21 @@ link_ends_vlbi [observation.transmitter] = ("Jupiter", "")
 
 # Create Bias settings 0.5 nrad in both RA and Dec
 bias_io = observation.absolute_bias(np.array([0.5e-6,0.5e-6]))
-bias_jup = observation.absolute_bias(np.array([0.5e-12,0.5e-12]))
+bias_jup = observation.absolute_bias(np.array([0.5e-6,0.5e-6]))
 
 # Create observation settings for each link/observable
 observation_settings_list_io = observation.angular_position(link_ends_stellar,bias_settings = bias_io)
 observation_settings_list_jup = observation.angular_position(link_ends_vlbi,bias_settings = bias_jup)
 
 # Define the observations for Io
-observation_times_io =  np.arange(simulation_start_epoch,simulation_end_epoch,86400)
+observation_times_io =  np.arange(simulation_start_epoch + 150*constants.JULIAN_DAY,simulation_start_epoch + 200*constants.JULIAN_DAY,60)
 observation_simulation_settings_io = observation.tabulated_simulation_settings(
     observation.angular_position_type,
     link_ends_stellar,
     observation_times_io
 )
 # Define the observations for Jupiter
-observation_times_jup =  np.arange(simulation_start_epoch,simulation_end_epoch,86400)
+observation_times_jup =  np.arange(simulation_start_epoch + 150*constants.JULIAN_DAY,simulation_start_epoch + 200*constants.JULIAN_DAY,60)
 observation_simulation_settings_jup = observation.tabulated_simulation_settings(
     observation.angular_position_type,
     link_ends_vlbi,
@@ -236,7 +236,7 @@ observation.add_gaussian_noise_to_settings(
     observation.angular_position_type
 )
 # Add noise levels of roughly 05 nrad to Jupiter
-noise_level_jup = 0.5e-12
+noise_level_jup = 0.5e-10
 observation.add_gaussian_noise_to_settings(
     [observation_simulation_settings_jup],
     noise_level_jup,
@@ -277,7 +277,7 @@ pod_input.define_estimation_settings(
 
 # Setup the weight matrix W (for first case assume W = 1)
 weights_per_observable = \
-    {estimation_setup.observation.angular_position_type: noise_level_jup ** -2}
+    {estimation_setup.observation.angular_position_type: noise_level_io ** -2}
 pod_input.set_constant_weight_per_observable(weights_per_observable)
 
 """"
@@ -355,3 +355,25 @@ plt.ylabel('Uncertainty $\sigma$ [m]')
 plt.xlabel('Time [Days]')
 plt.legend()
 plt.show()
+
+#initial_state = np.savetxt("initial_state.dat",state_array)
+
+#extract RA and Dec
+#%%
+T = np.block([
+    [-3.332028090770606e-10,-9.532932942374642e-11,2.354264495719784e-09],
+    [-6.616067867070324e-10,2.312501736536051e-09,0]
+])
+propagated_icrf_io = dict()
+formal_errors_icrf_io = dict()
+for epoch in list(variational_equations_solver.state_history):
+    propagated_icrf_io[epoch] = lalg.multi_dot([T,propagated_covariance_dict[epoch][:3,:3],T.T])
+    formal_errors_icrf_io[epoch] = np.sqrt(np.diag(propagated_icrf_io[epoch]))
+
+values_icrf = np.vstack(formal_errors_icrf_io.values())
+plt.figure(figsize=(9,5))
+alpha = values_icrf[:,0]
+dec = values_icrf[:,1]
+alpha = np.savetxt("rightascension.dat",alpha)
+delta = np.savetxt("declination.dat",dec)
+time = np.savetxt("obstime.dat",time_io)
