@@ -377,6 +377,7 @@ initial_state = np.savetxt("initial_state2.dat",state_array)
 """"
 Plot the propagated uncertainties in terms of RA and Dec in mas
 """
+#T is the Jacobian of f1 and f2, where x,y,z are the initial state of Io at t0
 T = np.block([
     [-5.04222865062317e-10,-7.28643667446313e-10,2.20819681275570e-09],
     [-2.10820830529310e-09,1.45888433446295e-09,0]
