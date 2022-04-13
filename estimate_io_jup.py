@@ -35,7 +35,7 @@ import math
 spice.load_standard_kernels()
 
 # Set simulation start and end epochs
-simulation_start_epoch = 0 #2459215.50
+simulation_start_epoch = 2462502.50
 simulation_end_epoch = simulation_start_epoch +  1*constants.JULIAN_YEAR
 
 
@@ -43,7 +43,7 @@ simulation_end_epoch = simulation_start_epoch +  1*constants.JULIAN_YEAR
 
 
 # Create default body settings
-bodies_to_create = ["Earth", "Io", "Jupiter","Sun"]
+bodies_to_create = ["Earth", "Io", "Jupiter","Sun","Saturn"]
 
 time_step = 3500
 initial_time = simulation_start_epoch - 5*time_step
@@ -91,6 +91,7 @@ acceleration_settings_io = dict(
 )
 acceleration_settings_jup = dict(
     Sun=[propagation_setup.acceleration.point_mass_gravity()],
+    Saturn = [propagation_setup.acceleration.point_mass_gravity()]
 )
 acceleration_settings = {"Io": acceleration_settings_io, "Jupiter": acceleration_settings_jup}
 
@@ -130,9 +131,8 @@ parameter_settings = estimation_setup.parameter.initial_states(propagator_settin
 parameters_to_estimate = estimation_setup.create_parameter_set(parameter_settings, bodies)
 
 # Create numerical integrator settings.
-fixed_step_size = 3500.0
-integrator_settings = propagation_setup.integrator.runge_kutta_4(
-    simulation_start_epoch, fixed_step_size
+integrator_settings = propagation_setup.integrator.runge_kutta_variable_step_size(
+    simulation_start_epoch, 3500.0, propagation_setup.integrator.rkf_78, 3500.0, 3500.0, 1.0, 1.0
 )
 # Create the variational equation solver and propagate the dynamics
 variational_equations_solver = numerical_simulation.SingleArcVariationalSimulator(
@@ -186,16 +186,16 @@ covariance_a_priori_inverse = np.linalg.inv(covariance_a_priori)
 Observation Setup
 """
 #%%
-# Define the position of the ground station on Earth
-station_altitude = 0.0
-delft_latitude = np.deg2rad(52.00667)
-delft_longitude = np.deg2rad(4.35556)
+# Define the position of the ground station on Earth,add ESTRACK Malargue station
+station_altitude = 1550.0
+estrack_latitude = np.deg2rad(35.776)
+estrack_longitude = np.deg2rad(69.398)
 
 # Add the ground station to the environment
 environment_setup.add_ground_station(
     bodies.get_body("Earth"),
     "TrackingStation",
-    [station_altitude, delft_latitude, delft_longitude],
+    [station_altitude, estrack_latitude, estrack_longitude],
     element_conversion.geodetic_position_type)
 
 # Define the uplink link ends types
@@ -215,19 +215,24 @@ observation_settings_list_io = observation.angular_position(link_ends_stellar,bi
 observation_settings_list_jup = observation.angular_position(link_ends_vlbi,bias_settings = bias_jup)
 
 # Define the observations for Io
-observation_times_io =  np.arange(simulation_start_epoch + 150*constants.JULIAN_DAY,simulation_start_epoch + 200*constants.JULIAN_DAY,60)
+step_io = 80*constants.JULIAN_DAY
+observation_times_io =  np.arange(simulation_start_epoch,simulation_end_epoch,step_io)
 observation_simulation_settings_io = observation.tabulated_simulation_settings(
     observation.angular_position_type,
     link_ends_stellar,
     observation_times_io
 )
-# Define the observations for Jupiter
-observation_times_jup =  np.arange(simulation_start_epoch + 150*constants.JULIAN_DAY,simulation_start_epoch + 200*constants.JULIAN_DAY,60)
+# Define the observations for Jupiter, INPUT: flyby period, observation period, integration time
+# output is observation_flat containing all the observation times in a single array
+step_jup = 53.4*constants.JULIAN_DAY
+observation_times_jup = np.arange(simulation_start_epoch,simulation_end_epoch,step_jup)
+
 observation_simulation_settings_jup = observation.tabulated_simulation_settings(
     observation.angular_position_type,
     link_ends_vlbi,
     observation_times_jup
 )
+
 # Add noise levels of roughly 05 nrad to Io
 noise_level_io = 0.5e-9
 observation.add_gaussian_noise_to_settings(
@@ -235,12 +240,20 @@ observation.add_gaussian_noise_to_settings(
     noise_level_io,
     observation.angular_position_type
 )
+
 # Add noise levels of roughly 05 nrad to Jupiter
-noise_level_jup = 0.5e-10
+noise_level_jup = 0.5e-9
 observation.add_gaussian_noise_to_settings(
     [observation_simulation_settings_jup],
     noise_level_jup,
     observation.angular_position_type
+)
+
+# Add viability settings for VLBI to account for low-elevation calibration data for Earth's troposphere
+elevation_setting = observation.elevation_angle_viability(["Earth", "TrackingStation"], np.deg2rad(15))
+observation.add_viability_check_to_settings(
+    [observation_simulation_settings_jup],
+    [elevation_setting]
 )
 """"
 Estimation setup
@@ -275,9 +288,9 @@ pod_input = estimation.PodInput(
 pod_input.define_estimation_settings(
     reintegrate_variational_equations=False)
 
-# Setup the weight matrix W (for first case assume W = 1)
+# Setup the weight matrix W
 weights_per_observable = \
-    {estimation_setup.observation.angular_position_type: noise_level_io ** -2}
+    {estimation_setup.observation.angular_position_type: noise_level_jup ** -2}
 pod_input.set_constant_weight_per_observable(weights_per_observable)
 
 """"
@@ -337,10 +350,11 @@ plt.plot(time_io/86400,values_io[:,0], label = 'R')
 plt.plot(time_io/86400,values_io[:,1], label = 'S')
 plt.plot(time_io/86400,values_io[:,2], label = 'W')
 plt.yscale("log")
+plt.ylim(1, 10e3)
 plt.grid(True, which="both", ls="-")
 plt.title("Propagation of $\sigma$ along radial, along-track and cross-track directions Io")
 plt.ylabel('Uncertainty $\sigma$ [m]')
-plt.xlabel('Time [Days]')
+plt.xlabel('Time since 2030 [Days]')
 plt.legend()
 plt.show()
 
@@ -352,17 +366,20 @@ plt.yscale("log")
 plt.grid(True, which="both", ls="-")
 plt.title("Propagation of $\sigma$ along radial, along-track and cross-track directions Jupiter")
 plt.ylabel('Uncertainty $\sigma$ [m]')
-plt.xlabel('Time [Days]')
+plt.xlabel('Time since 2030 [Days]')
 plt.legend()
 plt.show()
+state_array = result2array(states)
+initial_state = np.savetxt("initial_state2.dat",state_array)
 
-#initial_state = np.savetxt("initial_state.dat",state_array)
 
-#extract RA and Dec
 #%%
+""""
+Plot the propagated uncertainties in terms of RA and Dec in mas
+"""
 T = np.block([
-    [-3.332028090770606e-10,-9.532932942374642e-11,2.354264495719784e-09],
-    [-6.616067867070324e-10,2.312501736536051e-09,0]
+    [-5.04222865062317e-10,-7.28643667446313e-10,2.20819681275570e-09],
+    [-2.10820830529310e-09,1.45888433446295e-09,0]
 ])
 propagated_icrf_io = dict()
 formal_errors_icrf_io = dict()
@@ -374,6 +391,17 @@ values_icrf = np.vstack(formal_errors_icrf_io.values())
 plt.figure(figsize=(9,5))
 alpha = values_icrf[:,0]
 dec = values_icrf[:,1]
-alpha = np.savetxt("rightascension.dat",alpha)
-delta = np.savetxt("declination.dat",dec)
-time = np.savetxt("obstime.dat",time_io)
+plt.plot(time_io,alpha/4.847309743e-9, label = 'RA')
+plt.title("Propagation of $\sigma$ in Right Ascension Io")
+plt.ylabel('Uncertainty $\sigma$ [mas]')
+plt.xlabel('Time since 2030 [Days]')
+plt.legend()
+plt.show()
+
+plt.figure(figsize=(9,5))
+plt.plot(time_io,dec/4.847309743e-9, label = 'Dec')
+plt.title("Propagation of $\sigma$ in Declination Io")
+plt.ylabel('Uncertainty $\sigma$ [mas]')
+plt.xlabel('Time since 2030 [Days]')
+plt.legend()
+plt.show()
