@@ -9,12 +9,13 @@ cov: uncertainty and correlation of estimated parameters for both Io and Jupiter
 """
 #%%
 # Load standard modules
+import datetime
 import math
 
 import numpy as np
 from numpy import linalg as lalg
 from matplotlib import pyplot as plt
-
+import datetime
 # Load tudatpy modules
 from tudatpy.util import result2array
 from tudatpy.kernel import constants
@@ -28,22 +29,24 @@ from tudatpy.kernel.astro import element_conversion
 from tudatpy.kernel.numerical_simulation import propagation_setup, propagation
 import pandas as pd
 from tudatpy.kernel.astro import frame_conversion
+from tudatpy.kernel.astro import time_conversion
 import math
 
 
 # Load spice kernels
 spice.load_standard_kernels()
 
-# Set simulation start and end epochs
-simulation_start_epoch = 2462502.50
-simulation_end_epoch = simulation_start_epoch +  1*constants.JULIAN_YEAR
+# Set simulation start and end epochs START: 2029-01-01 END: 2032-01-01
+calendar_start = datetime.datetime(2029,1,1)
+simulation_start_epoch = time_conversion.calendar_date_to_julian_day_since_epoch(calendar_start)*constants.JULIAN_DAY
+simulation_end_epoch = simulation_start_epoch +  3*constants.JULIAN_YEAR
 
 
 ## Environment setup
 
 
 # Create default body settings
-bodies_to_create = ["Earth", "Io", "Jupiter","Sun","Saturn"]
+bodies_to_create = ["Earth", "Io", "Jupiter","Sun","Saturn","Ganymede","Europa","Callisto"]
 
 time_step = 3500
 initial_time = simulation_start_epoch - 5*time_step
@@ -86,8 +89,13 @@ for body_name in bodies_to_create:
 ### Create the acceleration model
 
 acceleration_settings_io = dict(
-    Jupiter = [propagation_setup.acceleration.point_mass_gravity()],
-    Sun = [propagation_setup.acceleration.point_mass_gravity()]
+    Jupiter = [propagation_setup.acceleration.spherical_harmonic_gravity(2,0)],
+    Sun = [propagation_setup.acceleration.point_mass_gravity()],
+    Saturn = [propagation_setup.acceleration.point_mass_gravity()],
+    Europa = [propagation_setup.acceleration.point_mass_gravity()],
+    Ganymede = [propagation_setup.acceleration.point_mass_gravity()],
+    Callisto = [propagation_setup.acceleration.point_mass_gravity()]
+
 )
 acceleration_settings_jup = dict(
     Sun=[propagation_setup.acceleration.point_mass_gravity()],
@@ -215,8 +223,12 @@ observation_settings_list_io = observation.angular_position(link_ends_stellar,bi
 observation_settings_list_jup = observation.angular_position(link_ends_vlbi,bias_settings = bias_jup)
 
 # Define the observations for Io
-step_io = 80*constants.JULIAN_DAY
-observation_times_io =  np.arange(simulation_start_epoch,simulation_end_epoch,step_io)
+#obs_start = datetime.datetime(2030,4,23)
+#obs_io = time_conversion.calendar_date_to_julian_day_since_epoch(obs_start)*constants.JULIAN_DAY
+#observation_times_io = np.arange(obs_io, obs_io + 60*constants.JULIAN_DAY,86400)
+observation_times_io = np.array([956232000.0,956923200.0,957096000.0,957528000.0,957700800.0,957873600.0,958046400.0,958737600.0,958915500.0000179,
+                                958984079.9999938,958984560.0000054,958987679.9999803,958996800.0,959169600.0,959342400.0,959428800.0,959947200.0,
+                                960206400.0,960552000.0,960811200.0,960897600.0,961070400.0,961243200.0,961329600.0])
 observation_simulation_settings_io = observation.tabulated_simulation_settings(
     observation.angular_position_type,
     link_ends_stellar,
@@ -346,41 +358,39 @@ time_jup = np.array(list(propagated_formal_errors_rsw_dict_jup))
 values_io = np.vstack(propagated_formal_errors_rsw_dict_io.values())
 values_jup = np.vstack(propagated_formal_errors_rsw_dict_jup.values())
 plt.figure(figsize=(9,5))
-plt.plot(time_io/86400,values_io[:,0], label = 'R')
-plt.plot(time_io/86400,values_io[:,1], label = 'S')
-plt.plot(time_io/86400,values_io[:,2], label = 'W')
+plt.plot(time_io/31536000,values_io[:,0], label = 'R')
+plt.plot(time_io/31536000,values_io[:,1], label = 'S')
+plt.plot(time_io/31536000,values_io[:,2], label = 'W')
 plt.yscale("log")
-plt.ylim(1, 10e3)
+#plt.vlines(x = [observation_times_io/86400],ymin=0, ymax=np.amax(values_io), colors='purple', ls='--')
 plt.grid(True, which="both", ls="-")
 plt.title("Propagation of $\sigma$ along radial, along-track and cross-track directions Io")
 plt.ylabel('Uncertainty $\sigma$ [m]')
-plt.xlabel('Time since 2030 [Days]')
+plt.xlabel('Time')
 plt.legend()
 plt.show()
 
 plt.figure(figsize=(9,5))
-plt.plot(time_jup/86400,values_jup[:,0], label = 'R')
-plt.plot(time_jup/86400,values_jup[:,1], label = 'S')
-plt.plot(time_jup/86400,values_jup[:,2], label = 'W')
+plt.plot(time_jup/31536000,values_jup[:,0], label = 'R')
+plt.plot(time_jup/31536000,values_jup[:,1], label = 'S')
+plt.plot(time_jup/31536000,values_jup[:,2], label = 'W')
 plt.yscale("log")
 plt.grid(True, which="both", ls="-")
 plt.title("Propagation of $\sigma$ along radial, along-track and cross-track directions Jupiter")
 plt.ylabel('Uncertainty $\sigma$ [m]')
-plt.xlabel('Time since 2030 [Days]')
+plt.xlabel('Time')
 plt.legend()
 plt.show()
 state_array = result2array(states)
 initial_state = np.savetxt("initial_state2.dat",state_array)
-
-
+uncertainty_io = np.savetxt("uncertainty_io.dat",values_io)
+uncertainty_jup = np.savetxt("uncertainty_jup.dat",values_jup)
+time_prop = np.savetxt("time_prop.dat",time_io)
+obs = np.savetxt("observations_stellar.dat",observation_times_io)
 #%%
-""""
-Plot the propagated uncertainties in terms of RA and Dec in mas
-"""
-#T is the Jacobian of f1 and f2, where x,y,z are the initial state of Io at t0
 T = np.block([
-    [-5.04222865062317e-10,-7.28643667446313e-10,2.20819681275570e-09],
-    [-2.10820830529310e-09,1.45888433446295e-09,0]
+    [-5.11130909570499e-10,-7.14219852177654e-10,2.21140368872976e-09],
+    [-2.08198987569847e-09,1.48997451644291e-09,0]
 ])
 propagated_icrf_io = dict()
 formal_errors_icrf_io = dict()
