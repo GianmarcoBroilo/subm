@@ -8,9 +8,12 @@ OUTPUT
 cov: uncertainty and correlation of estimated parameters for both Io and Jupiter
 """
 #%%
+
+
 # Load standard modules
 import datetime
 import math
+
 
 import numpy as np
 from numpy import linalg as lalg
@@ -22,15 +25,16 @@ from tudatpy.kernel import constants
 from tudatpy.kernel.interface import spice
 from tudatpy.kernel import numerical_simulation
 from tudatpy.kernel.numerical_simulation import environment_setup
-from tudatpy.kernel.numerical_simulation import propagation_setup
 from tudatpy.kernel.numerical_simulation import estimation, estimation_setup
 from tudatpy.kernel.numerical_simulation.estimation_setup import observation
 from tudatpy.kernel.astro import element_conversion
 from tudatpy.kernel.numerical_simulation import propagation_setup, propagation
-import pandas as pd
 from tudatpy.kernel.astro import frame_conversion
 from tudatpy.kernel.astro import time_conversion
 import math
+import sys
+sys.path.insert(0,'/Users/gianmarcobroilo/Desktop/source-code/cmake-build-debug/tudatpy/tudatpy/')
+from tudatpy.kernel.numerical_simulation import estimation
 
 
 # Load spice kernels
@@ -87,15 +91,17 @@ for body_name in bodies_to_create:
         central_bodies.append("Sun")
 
 ### Create the acceleration model
-
 acceleration_settings_io = dict(
-    Jupiter = [propagation_setup.acceleration.spherical_harmonic_gravity(2,0)],
+    Jupiter = [propagation_setup.acceleration.mutual_spherical_harmonic_gravity(
+        8,0,2,2)],
     Sun = [propagation_setup.acceleration.point_mass_gravity()],
     Saturn = [propagation_setup.acceleration.point_mass_gravity()],
-    Europa = [propagation_setup.acceleration.point_mass_gravity()],
-    Ganymede = [propagation_setup.acceleration.point_mass_gravity()],
-    Callisto = [propagation_setup.acceleration.point_mass_gravity()]
-
+    Europa = [propagation_setup.acceleration.mutual_spherical_harmonic_gravity(
+        2,2,2,2)],
+    Ganymede = [propagation_setup.acceleration.mutual_spherical_harmonic_gravity(
+        2,2,2,2)],
+    Callisto = [propagation_setup.acceleration.mutual_spherical_harmonic_gravity(
+        2,2,2,2)]
 )
 acceleration_settings_jup = dict(
     Sun=[propagation_setup.acceleration.point_mass_gravity()],
@@ -301,10 +307,10 @@ pod_input.define_estimation_settings(
     reintegrate_variational_equations=False)
 
 # Setup the weight matrix W
-weights_per_observable = \
-    {estimation_setup.observation.angular_position_type: noise_level_jup ** -2}
-pod_input.set_constant_weight_per_observable(weights_per_observable)
-
+#weights_per_observable = \
+#    {estimation_setup.observation.angular_position_type: noise_level_jup ** -2}
+pod_input.set_constant_weight_per_observable_and_link_ends(observation.angular_position_type,link_ends_vlbi,noise_level_jup **2)
+pod_input.set_constant_weight_per_observable_and_link_ends(observation.angular_position_type,link_ends_stellar,noise_level_io **2)
 """"
 Run the estimation
 """
@@ -387,32 +393,3 @@ uncertainty_io = np.savetxt("uncertainty_io.dat",values_io)
 uncertainty_jup = np.savetxt("uncertainty_jup.dat",values_jup)
 time_prop = np.savetxt("time_prop.dat",time_io)
 obs = np.savetxt("observations_stellar.dat",observation_times_io)
-#%%
-T = np.block([
-    [-5.11130909570499e-10,-7.14219852177654e-10,2.21140368872976e-09],
-    [-2.08198987569847e-09,1.48997451644291e-09,0]
-])
-propagated_icrf_io = dict()
-formal_errors_icrf_io = dict()
-for epoch in list(variational_equations_solver.state_history):
-    propagated_icrf_io[epoch] = lalg.multi_dot([T,propagated_covariance_dict[epoch][:3,:3],T.T])
-    formal_errors_icrf_io[epoch] = np.sqrt(np.diag(propagated_icrf_io[epoch]))
-
-values_icrf = np.vstack(formal_errors_icrf_io.values())
-plt.figure(figsize=(9,5))
-alpha = values_icrf[:,0]
-dec = values_icrf[:,1]
-plt.plot(time_io,alpha/4.847309743e-9, label = 'RA')
-plt.title("Propagation of $\sigma$ in Right Ascension Io")
-plt.ylabel('Uncertainty $\sigma$ [mas]')
-plt.xlabel('Time since 2030 [Days]')
-plt.legend()
-plt.show()
-
-plt.figure(figsize=(9,5))
-plt.plot(time_io,dec/4.847309743e-9, label = 'Dec')
-plt.title("Propagation of $\sigma$ in Declination Io")
-plt.ylabel('Uncertainty $\sigma$ [mas]')
-plt.xlabel('Time since 2030 [Days]')
-plt.legend()
-plt.show()
