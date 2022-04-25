@@ -226,22 +226,16 @@ bias_jup = observation.absolute_bias(np.array([0.5e-6,0.5e-6]))
 observation_settings_list_io = observation.angular_position(link_ends_stellar,bias_settings = bias_io)
 observation_settings_list_jup = observation.angular_position(link_ends_vlbi,bias_settings = bias_jup)
 
-# Define the observations for Io
-#obs_start = datetime.datetime(2030,4,23)
-#obs_io = time_conversion.calendar_date_to_julian_day_since_epoch(obs_start)*constants.JULIAN_DAY
-#observation_times_io = np.arange(obs_io, obs_io + 60*constants.JULIAN_DAY,86400)
-observation_times_io = np.array([956232000.0,956923200.0,957096000.0,957528000.0,957700800.0,957873600.0,958046400.0,958737600.0,958915500.0000179,
-                                958984079.9999938,958984560.0000054,958987679.9999803,958996800.0,959169600.0,959342400.0,959428800.0,959947200.0,
-                                960206400.0,960552000.0,960811200.0,960897600.0,961070400.0,961243200.0,961329600.0])
+# Define the observations for Io INPUT: one observation 2030-05-23
+observation_times_io = [958996800.0]
 observation_simulation_settings_io = observation.tabulated_simulation_settings(
     observation.angular_position_type,
     link_ends_stellar,
     observation_times_io
 )
-# Define the observations for Jupiter, INPUT: flyby period, observation period, integration time
+# Define the observations for Jupiter, INPUT: one observation 2030-05-22
 # output is observation_flat containing all the observation times in a single array
-step_jup = 53.4*constants.JULIAN_DAY
-observation_times_jup = np.arange(simulation_start_epoch,simulation_end_epoch,step_jup)
+observation_times_jup = [958910400.0]
 
 observation_simulation_settings_jup = observation.tabulated_simulation_settings(
     observation.angular_position_type,
@@ -250,7 +244,7 @@ observation_simulation_settings_jup = observation.tabulated_simulation_settings(
 )
 
 # Add noise levels of roughly 05 nrad to Io
-noise_level_io = 0.5e-8
+noise_level_io = 4.85e-9
 observation.add_gaussian_noise_to_settings(
     [observation_simulation_settings_io],
     noise_level_io,
@@ -258,19 +252,14 @@ observation.add_gaussian_noise_to_settings(
 )
 
 # Add noise levels of roughly 05 nrad to Jupiter
-noise_level_jup = 0.5e-10
+noise_level_jup = 0.5e-9
 observation.add_gaussian_noise_to_settings(
     [observation_simulation_settings_jup],
     noise_level_jup,
     observation.angular_position_type
 )
 
-# Add viability settings for VLBI to account for low-elevation calibration data for Earth's troposphere
-elevation_setting = observation.elevation_angle_viability(["Earth", "TrackingStation"], np.deg2rad(15))
-observation.add_viability_check_to_settings(
-    [observation_simulation_settings_jup],
-    [elevation_setting]
-)
+
 """"
 Estimation setup
 """
@@ -307,8 +296,9 @@ pod_input.define_estimation_settings(
 # Setup the weight matrix W
 weights_vlbi = noise_level_jup ** -2
 weights_stellar = noise_level_io ** -2
-PodInput.set_constant_weight_for_observable_and_link_ends(observation.angular_position_type,link_ends_vlbi,weights_vlbi)
-PodInput.set_constant_weight_for_observable_and_link_ends(observation.angular_position_type,link_ends_stellar,weights_stellar)
+pod_input.set_constant_weight_for_observable_and_link_ends(observation.angular_position_type,link_ends_vlbi,weights_vlbi)
+pod_input.set_constant_weight_for_observable_and_link_ends(observation.angular_position_type,link_ends_stellar,weights_stellar)
+print("Test output")
 """"
 Run the estimation
 """
@@ -366,7 +356,6 @@ plt.plot(time_io/31536000,values_io[:,0], label = 'R')
 plt.plot(time_io/31536000,values_io[:,1], label = 'S')
 plt.plot(time_io/31536000,values_io[:,2], label = 'W')
 plt.yscale("log")
-#plt.vlines(x = [observation_times_io/86400],ymin=0, ymax=np.amax(values_io), colors='purple', ls='--')
 plt.grid(True, which="both", ls="-")
 plt.title("Propagation of $\sigma$ along radial, along-track and cross-track directions Io")
 plt.ylabel('Uncertainty $\sigma$ [m]')
