@@ -31,21 +31,21 @@ simulation_end_epoch = simulation_start_epoch +  1*constants.JULIAN_YEAR
 
 
 # Create default body settings
-bodies_to_create = ["Earth", "Io", "Jupiter"]
+bodies_to_create = ["Earth", "Jupiter","Sun"]
 
 time_step = 1500
 initial_time = simulation_start_epoch - 5*time_step
 final_time = simulation_end_epoch + 5*time_step
 
 # Create default body settings for bodies_to_create, with "Jupiter"/"J2000" as the global frame origin and orientation
-global_frame_origin = "Jupiter"
+global_frame_origin = "SSB"
 global_frame_orientation = "J2000"
 body_settings = environment_setup.get_default_body_settings(
     bodies_to_create, global_frame_origin, global_frame_orientation)
 
-original_io_ephemeris_settings = body_settings.get("Io").ephemeris_settings
-body_settings.get("Io").ephemeris_settings = environment_setup.ephemeris.tabulated_from_existing(
-    original_io_ephemeris_settings,initial_time, final_time, time_step
+original_jupiter_ephemeris_settings = body_settings.get("Jupiter").ephemeris_settings
+body_settings.get("Jupiter").ephemeris_settings = environment_setup.ephemeris.tabulated_from_existing(
+    original_jupiter_ephemeris_settings,initial_time, final_time, time_step
 )
 # Create system of bodies
 bodies = environment_setup.create_system_of_bodies(body_settings)
@@ -56,10 +56,10 @@ Propagation setup
 """
 
 # Define bodies that are propagated
-bodies_to_propagate = ["Io"]
+bodies_to_propagate = ["Jupiter"]
 
 # Define central bodies of propagation
-central_bodies = ["Jupiter"]
+central_bodies = ["Sun"]
 
 
 ### Create the acceleration model
@@ -70,14 +70,14 @@ The acceleration settings that act on `Io` are now to be defined.
 """
 
 # Define the accelerations acting on Io
-accelerations_settings_io = dict(
-    Jupiter=[
+accelerations_settings_jup = dict(
+    Sun=[
         propagation_setup.acceleration.point_mass_gravity()
     ]
 )
 
 # Create global accelerations dictionary
-acceleration_settings = {"Io": accelerations_settings_io}
+acceleration_settings = {"Jupiter": accelerations_settings_jup}
 
 # Create acceleration models
 acceleration_models = propagation_setup.create_acceleration_models(
@@ -89,10 +89,10 @@ acceleration_models = propagation_setup.create_acceleration_models(
 
 ### Define the initial state
 """
-The initial state of Io that will be propagated is now defined. 
+The initial state of Jupiter that will be propagated is now defined. 
 """
 
-# Set the initial state of Io
+# Set the initial state of Jupiter
 initial_state = propagation.get_initial_state_of_bodies(
     bodies_to_propagate=bodies_to_propagate,
     central_bodies=central_bodies,
@@ -117,7 +117,7 @@ parameter_settings = estimation_setup.parameter.initial_states(propagator_settin
 parameters_to_estimate = estimation_setup.create_parameter_set(parameter_settings, bodies)
 
 # Create numerical integrator settings.
-fixed_step_size = 3500.0
+fixed_step_size = 4000.0
 integrator_settings = propagation_setup.integrator.runge_kutta_4(
     simulation_start_epoch, fixed_step_size
 )
@@ -150,7 +150,7 @@ environment_setup.add_ground_station(
 # Define the uplink link ends for one-way observable
 link_ends = dict()
 link_ends[observation.receiver] = ("Earth", "TrackingStation")
-link_ends[observation.transmitter] = ("Io", "")
+link_ends[observation.transmitter] = ("Jupiter", "")
 
 # Create Bias settings 0.5 nrad in both RA and Dec
 bias = observation.absolute_bias(np.array([0.5e-9,0.5e-9]))
@@ -160,7 +160,7 @@ observation_settings_list = [observation.angular_position(link_ends,bias_setting
 ### Define Observation Simulation Settings
 # Define observation simulation times for each link:
 #observation_times_stellar =  np.arange(simulation_start_epoch+200*constants.JULIAN_DAY,simulation_start_epoch + 210*constants.JULIAN_DAY,60)#2459216.50,2459306.93,2459459.50
-observation_times =  [100*constants.JULIAN_DAY,]
+observation_times =  [150*constants.JULIAN_DAY]
 observation_simulation_settings = observation.tabulated_simulation_settings(
     observation.angular_position_type,
     link_ends,
@@ -184,9 +184,9 @@ for epoch in list(variational_equations_solver.state_history):
     rotation_rsw_to_inertial_dict[epoch] = frame_conversion.rsw_to_inertial_rotation_matrix(states[epoch]).reshape(3,3)
 
 uncertainties_rsw = np.zeros((3,3))
-np.fill_diagonal(uncertainties_rsw,[15e3,15e3,15e3])
+np.fill_diagonal(uncertainties_rsw,[1e3,1e3,1e3])
 uncertainties_rsw_velocity = np.zeros((3,3))
-np.fill_diagonal(uncertainties_rsw_velocity,[0.15,1.15,0.75])
+np.fill_diagonal(uncertainties_rsw_velocity,[0.1,0.1,0.1])
 covariance_position_initial = lalg.multi_dot([rotation_rsw_to_inertial_dict[simulation_start_epoch],uncertainties_rsw,rotation_rsw_to_inertial_dict[simulation_start_epoch].T])
 covariance_velocity_initial = lalg.multi_dot([rotation_rsw_to_inertial_dict[simulation_start_epoch],uncertainties_rsw_velocity,rotation_rsw_to_inertial_dict[simulation_start_epoch].T])
 covariance_a_priori = np.block([
@@ -287,12 +287,11 @@ time = np.array(list(propagated_formal_errors_rsw_dict))
 values = np.vstack(propagated_formal_errors_rsw_dict.values())
 
 plt.figure(figsize=(9,5))
-plt.plot(time,values[:,0], label = 'R')
-plt.plot(time,values[:,1], label = 'S')
-plt.plot(time,values[:,2], label = 'W')
+plt.plot(time/86400,values[:,0], label = 'R')
+plt.plot(time/86400,values[:,1], label = 'S')
+plt.plot(time/86400,values[:,2], label = 'W')
 plt.yscale("log")
-plt.scatter(simulated_observations.concatenated_times[1],100000,marker='x', color='black')
-
+plt.scatter(simulated_observations.concatenated_times[1]/86400,1000,marker='x', color='black')
 plt.grid(True, which="both", ls="-")
 plt.title("Propagation of $\sigma$ along radial, along-track and cross-track directions")
 plt.ylabel('Uncertainty $\sigma$ [m]')
