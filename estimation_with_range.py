@@ -232,8 +232,6 @@ observation_simulation_settings_io = observation.tabulated_simulation_settings(
 )
 
 # Define the observations for Jupiter VLBI and RANGE
-step_jup = 7*constants.JULIAN_DAY
-
 observation_times_jup = np.arange(simulation_start_epoch,simulation_end_epoch,53.4*constants.JULIAN_DAY)
 
 observation_simulation_settings_jup = observation.tabulated_simulation_settings(
@@ -246,7 +244,7 @@ observation_simulation_settings_jup_range = observation.tabulated_simulation_set
     link_ends_jupiter,
     observation_times_jup
 )
-# Add noise levels of roughly 1 mas to Io 10 mas = 4.8481368E-8 5 mas = 2.4240684E-8 1 mas = 4.8481368E-9
+# Add noise levels to Io 10 mas = 4.8481368E-8 5 mas = 2.4240684E-8 1 mas = 4.8481368E-9
 noise_level_io = 4.8481368e-8
 observation.add_gaussian_noise_to_settings(
     [observation_simulation_settings_io],
@@ -254,7 +252,7 @@ observation.add_gaussian_noise_to_settings(
     observation.angular_position_type
 )
 
-# Add noise levels of roughly 0.1 nrad to Jupiter
+# Add noise levels of roughly 0.5 nrad to Jupiter VLBI
 noise_level_jup = 0.5e-9
 observation.add_gaussian_noise_to_settings(
     [observation_simulation_settings_jup],
@@ -262,6 +260,7 @@ observation.add_gaussian_noise_to_settings(
     observation.angular_position_type
 )
 
+# Add noise levels of roughly 20cm to Jupiter RANGE
 noise_level_range = 0.20
 observation.add_gaussian_noise_to_settings(
     [observation_simulation_settings_jup_range],
@@ -307,8 +306,7 @@ pod_input.define_estimation_settings(
 # Setup the weight matrix W with weights for Io and weights for Jupiter
 weights_vlbi = noise_level_jup ** -2
 weights_stellar = noise_level_io ** -2
-weights_range = \
-{estimation_setup.observation.one_way_range_type: noise_level_range ** -2}
+weights_range = \ {estimation_setup.observation.one_way_range_type: noise_level_range ** -2}
 pod_input.set_constant_weight_for_observable_and_link_ends(observation.angular_position_type,link_ends_io,weights_vlbi)
 pod_input.set_constant_weight_for_observable_and_link_ends(observation.angular_position_type,link_ends_jupiter,weights_stellar)
 pod_input.set_constant_weight_per_observable(weights_range)
