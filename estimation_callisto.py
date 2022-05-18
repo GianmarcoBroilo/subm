@@ -233,7 +233,7 @@ observation_simulation_settings_cal = observation.tabulated_simulation_settings(
 )
 
 observation_3dposition = observation.tabulated_simulation_settings(
-    observation_settings_list_position,
+    observation.cartesian_position(),
     link_ends_stellar,
     observations_position
 )
