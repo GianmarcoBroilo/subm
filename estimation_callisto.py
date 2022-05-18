@@ -208,6 +208,8 @@ link_ends_stellar[observation.transmitter] = ("Callisto", "")
 link_ends_vlbi = dict()
 link_ends_vlbi[observation.receiver] = ("Earth", "")
 link_ends_vlbi [observation.transmitter] = ("Jupiter", "")
+link_ends_position = dict()
+link_ends_position[observation.observed_body] = ("Callisto","")
 
 # Create Bias settings 0.5 nrad in both RA and Dec
 #bias_io = observation.absolute_bias(np.array([0.5e-9,0.5e-9]))
@@ -216,7 +218,7 @@ link_ends_vlbi [observation.transmitter] = ("Jupiter", "")
 # Create observation settings for each link/observable
 observation_settings_list_cal = observation.angular_position(link_ends_stellar)
 observation_settings_list_jup = observation.angular_position(link_ends_vlbi)
-observation_settings_list_position = observation.cartesian_position(link_ends_stellar)
+observation_settings_list_position = observation.cartesian_position(link_ends_position)
 
 # Define the observations for Io STELLAR OCCULTATION
 stellar_occ = datetime.datetime(2024,1,15)
@@ -233,8 +235,8 @@ observation_simulation_settings_cal = observation.tabulated_simulation_settings(
 )
 
 observation_3dposition = observation.tabulated_simulation_settings(
-    observation.cartesian_position(),
-    link_ends_stellar,
+    observation.position_observable_type,
+    link_ends_position,
     observations_position
 )
 
@@ -255,6 +257,13 @@ observation.add_gaussian_noise_to_settings(
     observation.angular_position_type
 )
 
+noise_level_position = 15e3
+observation.add_gaussian_noise_to_settings(
+    [observation_3dposition],
+    noise_level_position,
+    observation.position_observable_type
+)
+
 # Add noise levels of roughly 0.5 nrad to Jupiter
 noise_level_jup = 0.5e-9
 observation.add_gaussian_noise_to_settings(
@@ -265,6 +274,7 @@ observation.add_gaussian_noise_to_settings(
 
 
 
+
 """"
 Estimation setup
 """
@@ -272,11 +282,11 @@ Estimation setup
 observation_settings_list = []
 observation_settings_list.append(observation_settings_list_cal)
 observation_settings_list.append(observation_settings_list_jup)
-#observation_settings_list.append(observation_settings_list_position)
+observation_settings_list.append(observation_settings_list_position)
 observation_simulation_settings = []
 observation_simulation_settings.append(observation_simulation_settings_cal)
 observation_simulation_settings.append(observation_simulation_settings_jup)
-#observation_simulation_settings.append(observation_3dposition)
+observation_simulation_settings.append(observation_3dposition)
 
 # Create the estimation object for Callisto and Jupiter
 estimator = numerical_simulation.Estimator(
@@ -303,8 +313,10 @@ pod_input.define_estimation_settings(
 # Setup the weight matrix W with weights for Io and weights for Jupiter
 weights_vlbi = noise_level_jup ** -2
 weights_stellar = noise_level_cal ** -2
+weights_position = noise_level_position ** -2
 pod_input.set_constant_weight_for_observable_and_link_ends(observation.angular_position_type,link_ends_vlbi,weights_vlbi)
 pod_input.set_constant_weight_for_observable_and_link_ends(observation.angular_position_type,link_ends_stellar,weights_stellar)
+pod_input.set_constant_weight_for_observable_and_link_ends(observation.position_observable_type,link_ends_position,weights_position)
 
 
 """"
